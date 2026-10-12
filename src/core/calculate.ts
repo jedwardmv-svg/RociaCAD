@@ -11,6 +11,7 @@
  *  3. Cada evaluación resuelve la red completa (árbol o malla) con Newton-Raphson.
  *  4. Se suma la asignación de mangueras y se compara contra la curva de suministro.
  */
+import { getSprinklerModel } from './catalog';
 import { equivalentLength, FITTING_NAMES } from './fittings';
 import { HAZARDS } from './hazards';
 import { frictionLossPerFt, pipeResistance, supplyFlowAt, supplyPressureAt, velocity } from './hydraulics';
@@ -131,7 +132,7 @@ export function pipeGeometry(project: Project, pipe: Pipe): PipeGeometry {
   const b = project.nodes.find((n) => n.id === pipe.to);
   const dist = a && b ? Math.hypot(b.x - a.x, b.y - a.y, b.z - a.z) : 0;
   const lengthFt = pipe.lengthOverride ?? dist;
-  const idIn = pipe.idOverride ?? internalDiameter(pipe.material, pipe.size) ?? NaN;
+  const idIn = pipe.idOverride ?? internalDiameter(pipe.material, pipe.size, project) ?? NaN;
   let fittingFt = 0;
   for (const f of pipe.fittings) fittingFt += f.count * equivalentLength(f.type, pipe.size, pipe.c, idIn);
   return { lengthFt, fittingFt, totalFt: lengthFt + fittingFt, idIn };
@@ -205,9 +206,12 @@ export function calculate(project: Project): CalcResult {
   const src = map[source];
 
   // --- Requisitos de cada rociador abierto
+  /** presión mínima de un rociador: la del criterio o la de su hoja técnica, la mayor */
+  const minP = (s: (typeof project.sprinklers)[number]) =>
+    Math.max(crit.minSprinklerPressure, getSprinklerModel(s.modelId, project)?.minPressure ?? 0);
   const req = design.map((s) => {
     const qMin = crit.density * s.coverage;
-    const pReq = Math.max(crit.minSprinklerPressure, (qMin / s.k) ** 2);
+    const pReq = Math.max(minP(s), (qMin / s.k) ** 2);
     return { s, node: map[index.get(s.nodeId)!], qMin, pReq };
   });
 
@@ -330,7 +334,7 @@ export function calculate(project: Project): CalcResult {
     const flowing = s.inDesignArea && j >= 0;
     const flow = flowing ? s.k * Math.sqrt(Math.max(pressure, 0)) : 0;
     const qMin = crit.density * s.coverage;
-    const pReq = Math.max(crit.minSprinklerPressure, (qMin / s.k) ** 2);
+    const pReq = Math.max(minP(s), (qMin / s.k) ** 2);
     sprinklers[s.id] = {
       id: s.id,
       nodeId: s.nodeId,
@@ -338,7 +342,7 @@ export function calculate(project: Project): CalcResult {
       flowing,
       pressure,
       flow,
-      requiredFlow: flowing ? Math.max(qMin, s.k * Math.sqrt(crit.minSprinklerPressure)) : 0,
+      requiredFlow: flowing ? Math.max(qMin, s.k * Math.sqrt(minP(s))) : 0,
       requiredPressure: pReq,
       density: flowing && s.coverage > 0 ? flow / s.coverage : 0,
     };
@@ -394,9 +398,15 @@ export function calculate(project: Project): CalcResult {
         `Con la cobertura promedio se necesitan unos ${suggestedCount} rociadores abiertos.`,
     );
   }
+  const overListed = project.sprinklers.filter((s) => {
+    const mc = getSprinklerModel(s.modelId, project)?.maxCoverage;
+    return mc !== undefined && s.coverage > mc + 1e-6;
+  });
+  if (overListed.length)
+    warnings.push(`${overListed.length} rociador(es) cubren más área de la que permite su hoja técnica: ${overListed.slice(0, 6).map((s) => s.id).join(', ')}${overListed.length > 6 ? '…' : ''}.`);
   if (crit.hazard !== 'custom') {
     const maxCov = HAZARDS[crit.hazard].maxCoverage;
-    const over = project.sprinklers.filter((s) => s.coverage > maxCov + 1e-6).map((s) => s.id);
+    const over = project.sprinklers.filter((s) => s.coverage > maxCov + 1e-6 && getSprinklerModel(s.modelId, project)?.maxCoverage === undefined).map((s) => s.id);
     if (over.length)
       warnings.push(
         `${over.length} rociador(es) cubren más de ${maxCov} ft², el máximo usual para ${HAZARDS[crit.hazard].name.toLowerCase()} con rociadores estándar.`,

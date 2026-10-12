@@ -10,3 +10,5 @@ export * from './bom';
 export * from './example';
 export * from './edit';
 export * from './dxf';
+export * from './catalog';
+export * from './exportDxf';

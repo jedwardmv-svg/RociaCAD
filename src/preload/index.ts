@@ -5,8 +5,9 @@
 import { contextBridge, ipcRenderer } from 'electron';
 
 const api = {
-  openFile: (): Promise<{ path: string; name: string; content: string } | null> => ipcRenderer.invoke('file:open'),
-  saveFile: (args: { path?: string; content: string; suggestedName?: string }): Promise<{ path: string; name: string } | null> =>
+  openFile: (kind: 'project' | 'catalog' = 'project'): Promise<{ path: string; name: string; content: string } | null> =>
+    ipcRenderer.invoke('file:open', kind),
+  saveFile: (args: { path?: string; content: string; suggestedName?: string; kind?: 'project' | 'catalog' | 'dxf' }): Promise<{ path: string; name: string } | null> =>
     ipcRenderer.invoke('file:save', args),
   exportPdf: (args: { suggestedName: string }): Promise<{ path: string } | null> => ipcRenderer.invoke('pdf:export', args),
   confirm: (args: { message: string; detail?: string; buttons: string[] }): Promise<number> => ipcRenderer.invoke('app:confirm', args),
@@ -16,6 +17,9 @@ const api = {
   closeAfterSave: () => ipcRenderer.send('app:close-after-save'),
   onMenu: (cb: (action: string) => void) => {
     ipcRenderer.on('menu', (_e, action: string) => cb(action));
+  },
+  onUpdateStatus: (cb: (text: string) => void) => {
+    ipcRenderer.on('update-status', (_e, text: string) => cb(text));
   },
 };
 

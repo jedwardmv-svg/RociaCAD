@@ -1112,3 +1112,163 @@ details.layers li small {
   font-weight: 600;
   pointer-events: none;
 }
+
+/* ---------- Catálogo ---------- */
+.catalog-dialog {
+  width: min(980px, 94vw);
+  height: min(680px, 90vh);
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--panel);
+  color: var(--ink);
+  display: none;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.catalog-dialog[open] {
+  display: flex;
+}
+
+.catalog-dialog::backdrop {
+  background: rgba(20, 28, 35, 0.45);
+}
+
+.cat-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--line);
+}
+
+.cat-head h1 {
+  margin: 0 12px 0 0;
+  font-size: 17px;
+}
+
+.cat-head .tabs {
+  flex: 1;
+  border: 0;
+  background: transparent;
+  padding: 0;
+}
+
+.cat-body {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 300px 1fr;
+}
+
+.cat-list {
+  overflow-y: auto;
+  border-right: 1px solid var(--line);
+  padding: 10px;
+}
+
+.cat-new {
+  width: 100%;
+  justify-content: center;
+  margin-bottom: 8px;
+}
+
+.cat-list ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.cat-list li button {
+  width: 100%;
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: var(--r-sm);
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+
+.cat-list li button:hover {
+  background: var(--hover);
+}
+
+.cat-list li button.sel {
+  background: var(--ink);
+  color: #fff;
+}
+
+.cat-list li button small {
+  color: var(--muted);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.cat-list li button.sel small {
+  color: #c8d2da;
+}
+
+.cat-form {
+  overflow-y: auto;
+  padding: 14px 18px;
+  max-width: 560px;
+}
+
+.cat-form h2 {
+  margin: 0 0 4px;
+  font-size: 17px;
+}
+
+.cat-form h3 {
+  margin: 16px 0 2px;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.cat-form .field {
+  grid-template-columns: 1fr 220px;
+}
+
+.cat-form-head {
+  margin-bottom: 10px;
+}
+
+.cat-sizes {
+  max-width: 420px;
+}
+
+.cat-sizes td .input-unit {
+  height: 26px;
+  width: 150px;
+  margin-left: auto;
+}
+
+.color-input {
+  width: 64px;
+  height: 28px;
+  padding: 0 2px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: var(--surface);
+}
+
+.input-unit input:disabled {
+  color: var(--muted);
+}
+
+.update-status {
+  color: var(--water);
+  font-weight: 600;
+}
+
+.input-text[readonly],
+.input-unit:has(input:disabled) {
+  background: var(--panel);
+  color: var(--muted);
+}

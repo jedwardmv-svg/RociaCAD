@@ -1,7 +1,7 @@
 /**
  * Panel inferior con pestañas: tablas de cálculo, materiales y avisos.
  */
-import { fmt, internalDiameter, MATERIALS, ORIENTATION_NAMES, sizeLabel, unitLabel, type BomCategory, type Quantity } from '../../core';
+import { fmt, getMaterial, internalDiameter, ORIENTATION_NAMES, sizeLabel, unitLabel, type BomCategory, type Quantity } from '../../core';
 import { clear, h, parseNum } from './dom';
 import { numInput, rerender } from './fields';
 import { store, type Selection } from './state';
@@ -91,7 +91,7 @@ function pipesTable(el: HTMLElement) {
   }
   const rows = pipes.map((p) => {
     const pr = r.ok ? r.pipes[p.id] : undefined;
-    const idIn = p.idOverride ?? internalDiameter(p.material, p.size) ?? NaN;
+    const idIn = p.idOverride ?? internalDiameter(p.material, p.size, store.project) ?? NaN;
     const flowing = pr && Math.abs(pr.flow) > 1e-6;
     const vel = pr ? h('span', { class: pr.velocity > store.project.criteria.maxVelocity ? 'bad' : '' }, fmt('velocity', pr.velocity, u)) : '—';
     return row(
@@ -306,11 +306,11 @@ function bomTable(el: HTMLElement) {
       h(
         'label',
         null,
-        h('span', null, MATERIALS[m].name),
+        h('span', null, getMaterial(m, store.project).name),
         numInput({
-          label: `Largo del tubo de ${MATERIALS[m].name}`,
+          label: `Largo del tubo de ${getMaterial(m, store.project).name}`,
           q: 'length',
-          value: store.project.stickLengths?.[m] ?? MATERIALS[m].stickLengthFt,
+          value: store.project.stickLengths?.[m] ?? getMaterial(m, store.project).stickLengthFt,
           key: `stick-${m}`,
           min: 0.1,
           onCommit: (v) => store.mutate((p) => (p.stickLengths = { ...(p.stickLengths ?? {}), [m]: v })),

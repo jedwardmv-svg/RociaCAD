@@ -7,9 +7,10 @@ export type Selection =
   | { kind: 'node'; id: string }
   | { kind: 'pipe'; id: string }
   | { kind: 'sprinkler'; id: string }
+  | { kind: 'element'; id: string }
   | null;
 
-export type Tool = 'select' | 'draw' | 'sprinkler' | 'calibrate' | 'move-plan';
+export type Tool = 'select' | 'draw' | 'sprinkler' | 'element' | 'calibrate' | 'move-plan';
 
 export type ColorMode = 'material' | 'size' | 'pressure' | 'velocity';
 
@@ -38,6 +39,10 @@ class Store {
     role: 'branch' as Project['pipes'][number]['role'],
     gridFt: 0.5 / 0.3048,
     k: 5.6,
+    sprinklerModelId: 'gen-k56-pend',
+    elementTypeId: 'wall-block-15',
+    /** ft: base de los elementos nuevos */
+    elementZ: 0,
   };
 
   private undoStack: string[] = [];
@@ -121,7 +126,8 @@ class Store {
     const exists =
       (s.kind === 'node' && p.nodes.some((n) => n.id === s.id)) ||
       (s.kind === 'pipe' && p.pipes.some((n) => n.id === s.id)) ||
-      (s.kind === 'sprinkler' && p.sprinklers.some((n) => n.id === s.id));
+      (s.kind === 'sprinkler' && p.sprinklers.some((n) => n.id === s.id)) ||
+      (s.kind === 'element' && (p.elements ?? []).some((n) => n.id === s.id));
     if (!exists) this.selection = null;
   }
 

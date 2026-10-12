@@ -10,9 +10,13 @@ import {
   FITTING_NAMES,
   fmt,
   internalDiameter,
-  MATERIAL_IDS,
-  MATERIALS,
+  applySprinklerModel,
+  deleteElement,
+  ELEMENT_KIND_NAMES,
+  ELEMENT_KIND_SHAPE,
+  getElementType,
   ORIENTATION_NAMES,
+  putInProjectCatalog,
   PIPE_ROLE_NAMES,
   pipeGeometry,
   sizeLabel,
@@ -24,6 +28,8 @@ import {
   type Quantity,
   type SprinklerOrientation,
 } from '../../core';
+import { catalogElements, catalogMaterials, catalogSprinklers, findMaterial, findSprinklerModel } from './catalogStore';
+import { openCatalog } from './catalogDialog';
 import { clear, h } from './dom';
 import { numField, numInput, rerender, selectField, selectInput, textField } from './fields';
 import { store } from './state';
@@ -38,8 +44,19 @@ export function renderInspector(el: HTMLElement) {
     if (!sel) return clear(el, emptyHelp());
     if (sel.kind === 'pipe') return clear(el, pipePanel(sel.id));
     if (sel.kind === 'node') return clear(el, nodePanel(sel.id));
+    if (sel.kind === 'element') return clear(el, elementPanel(sel.id));
     return clear(el, sprinklerPanel(sel.id));
   });
+}
+
+/** Aplica al rociador nuevo el modelo elegido en la herramienta Rociador */
+function withModel(p: import('../../core').Project, s: import('../../core').Sprinkler): string {
+  const model = findSprinklerModel(store.drawDefaults.sprinklerModelId);
+  if (model) {
+    putInProjectCatalog(p, 'sprinklers', model);
+    applySprinklerModel(s, model);
+  }
+  return s.id;
 }
 
 function readout(rows: [string, string, boolean?][]): HTMLElement {
@@ -61,8 +78,10 @@ function emptyHelp(): HTMLElement {
     { class: 'section empty-help' },
     h('h2', null, 'Nada seleccionado'),
     h('p', null, 'Haga clic en un tubo, un nodo o un rociador para ver y cambiar sus datos.'),
-    h('p', null, 'Con la herramienta Dibujar tubería haga clic en un nodo existente y luego en el punto final. Termine con ', k('Esc'), ' o clic derecho.'),
-    h('p', null, 'Con la herramienta Rociador haga clic en un nodo o sobre un tubo para colocar uno.'),
+    h('p', null, 'Con la herramienta Tubería haga clic en un nodo existente y luego en el punto final. Termine con ', k('Esc'), ' o clic derecho.'),
+    h('p', null, 'Con la herramienta Rociador haga clic en un nodo o sobre un tubo para colocar uno del modelo elegido.'),
+    h('p', null, 'Con Elementos dibuje muros, columnas, vigas, losas, cielos, ductos y tuberías de otros sistemas.'),
+    h('p', null, 'En Catálogo puede crear sus propias tuberías, rociadores y elementos.'),
     h('p', null, 'Arrastre para girar la vista, rueda para acercar y clic derecho para desplazar.'),
     h('p', null, k('Supr'), ' borra lo seleccionado, ', k('Ctrl'), '+', k('Z'), ' deshace.'),
   );
@@ -79,7 +98,7 @@ function pipePanel(id: string): HTMLElement {
       const pp = p.pipes.find((x) => x.id === id)!;
       fn(pp);
     }, key);
-  const catalogId = internalDiameter(pipe.material, pipe.size);
+  const catalogId = internalDiameter(pipe.material, pipe.size, store.project);
 
   const fittingRows = pipe.fittings.map((f, i) =>
     h(
@@ -112,19 +131,23 @@ function pipePanel(id: string): HTMLElement {
       selectField<MaterialId>(
         'Material',
         pipe.material,
-        MATERIAL_IDS.map((m) => ({ value: m, label: MATERIALS[m].name })),
+        catalogMaterials().map((m) => ({ value: m.id, label: m.name })),
         'pipe-mat',
-        (m) =>
-          set((pp) => {
-            pp.material = m;
-            pp.c = MATERIALS[m].cWet;
-            if (!internalDiameter(m, pp.size)) pp.size = sizesFor(m)[0];
+        (id) =>
+          store.mutate((p) => {
+            const m = findMaterial(id);
+            if (!m) return;
+            putInProjectCatalog(p, 'materials', m);
+            const pp = p.pipes.find((x) => x.id === pipe.id)!;
+            pp.material = id;
+            pp.c = m.cWet;
+            if (!m.id_in[pp.size]) pp.size = sizesFor(id, p)[0];
           }),
       ),
       selectField<NominalSize>(
         'Diámetro',
         pipe.size,
-        sizesFor(pipe.material).map((s) => ({ value: s, label: metric ? `${sizeLabel(s, true)} (${s}")` : `${s}"` })),
+        sizesFor(pipe.material, store.project).map((s) => ({ value: s, label: metric ? `${sizeLabel(s, true)} (${s}")` : `${s}"` })),
         'pipe-size',
         (s) => set((pp) => (pp.size = s)),
       ),
@@ -265,7 +288,7 @@ function nodePanel(id: string): HTMLElement {
                 class: 'btn outline small',
                 onclick: () => {
                   let sid = '';
-                  store.mutate((p) => (sid = addSprinkler(p, id, store.drawDefaults.k).id));
+                  store.mutate((p) => (sid = withModel(p, addSprinkler(p, id, 5.6))));
                   store.select({ kind: 'sprinkler', id: sid });
                 },
               },
@@ -279,7 +302,10 @@ function nodePanel(id: string): HTMLElement {
             title: 'Crea un bajante de 30 cm con un rociador colgante debajo de este nodo',
             onclick: () => {
               let sid = '';
-              store.mutate((p) => (sid = addDropWithSprinkler(p, id, dropFt, store.drawDefaults.k)?.id ?? ''));
+              store.mutate((p) => {
+                const spk = addDropWithSprinkler(p, id, dropFt, 5.6);
+                sid = spk ? withModel(p, spk) : '';
+              });
               if (sid) store.select({ kind: 'sprinkler', id: sid });
             },
           },
@@ -322,7 +348,35 @@ function sprinklerPanel(id: string): HTMLElement {
       'section',
       { class: 'section' },
       h('label', { class: 'check' }, toggle, 'Abierto en el área de diseño'),
-      numField({ label: 'Factor K', q: 'kfactor', value: s.k, key: 'spk-k', min: 0.1, onCommit: (v) => set((x) => (x.k = v)) }),
+      selectField<string>(
+        'Modelo',
+        s.modelId && findSprinklerModel(s.modelId) ? s.modelId : '',
+        [{ value: '', label: 'Datos propios (sin modelo)' }, ...catalogSprinklers().map((m) => ({ value: m.id, label: m.name }))],
+        'spk-model-id',
+        (mid) =>
+          store.mutate((p) => {
+            const x = p.sprinklers.find((y) => y.id === id)!;
+            const model = findSprinklerModel(mid);
+            if (!model) {
+              delete x.modelId;
+              return;
+            }
+            putInProjectCatalog(p, 'sprinklers', model);
+            applySprinklerModel(x, model);
+          }),
+      ),
+      numField({
+        label: 'Factor K',
+        q: 'kfactor',
+        value: s.k,
+        key: 'spk-k',
+        min: 0.1,
+        onCommit: (v) =>
+          set((x) => {
+            x.k = v;
+            delete x.modelId; // ya no corresponde al modelo del catálogo
+          }),
+      }),
       numField({ label: 'Área de cobertura', q: 'area', value: s.coverage, key: 'spk-cov', min: 0.1, onCommit: (v) => set((x) => (x.coverage = v)) }),
       selectField<SprinklerOrientation>(
         'Orientación',
@@ -366,6 +420,103 @@ function sprinklerPanel(id: string): HTMLElement {
             },
           },
           'Eliminar rociador',
+        ),
+      ),
+    ),
+  );
+}
+
+function elementPanel(id: string): HTMLElement {
+  const e = (store.project.elements ?? []).find((x) => x.id === id)!;
+  const u = store.project.displayUnits;
+  const t = getElementType(e.typeId, store.project);
+  const shape = ELEMENT_KIND_SHAPE[t.kind];
+  const set = (fn: (x: typeof e) => void, key?: string) =>
+    store.mutate((p) => {
+      fn((p.elements ?? []).find((x) => x.id === id)!);
+    }, key);
+  let length = 0;
+  for (let i = 0; i + 1 < e.points.length; i++) length += Math.hypot(e.points[i + 1].x - e.points[i].x, e.points[i + 1].y - e.points[i].y);
+  let area = 0;
+  if (shape === 'area') {
+    for (let i = 0; i < e.points.length; i++) {
+      const a = e.points[i];
+      const b = e.points[(i + 1) % e.points.length];
+      area += a.x * b.y - b.x * a.y;
+    }
+    area = Math.abs(area) / 2;
+  }
+  const zLabel = t.kind === 'beam' ? 'Fondo de la viga' : t.kind === 'duct' || t.kind === 'pipe-ref' ? 'Elevación del eje' : t.kind === 'ceiling' ? 'Altura del cielo' : 'Elevación de la base';
+  return h(
+    'div',
+    null,
+    h('section', { class: 'section' }, title(`${ELEMENT_KIND_NAMES[t.kind]} ${id}`, t.name)),
+    h(
+      'section',
+      { class: 'section' },
+      selectField<string>(
+        'Tipo',
+        e.typeId,
+        catalogElements()
+          .filter((x) => ELEMENT_KIND_SHAPE[x.kind] === shape)
+          .map((x) => ({ value: x.id, label: x.name })),
+        'el-type',
+        (tid) =>
+          store.mutate((p) => {
+            const type = catalogElements().find((x) => x.id === tid);
+            if (!type) return;
+            putInProjectCatalog(p, 'elements', type);
+            const x = (p.elements ?? []).find((y) => y.id === id)!;
+            x.typeId = tid;
+          }),
+      ),
+      numField({ label: zLabel, q: 'elevation', value: e.z, key: 'el-z', onCommit: (v) => set((x) => (x.z = v)) }),
+      numField({
+        label: t.kind === 'beam' ? 'Peralte' : shape === 'area' ? 'Espesor' : 'Alto',
+        q: 'length',
+        value: e.height,
+        placeholder: fmt('length', t.height, u),
+        allowEmpty: true,
+        min: 0.001,
+        key: 'el-h',
+        hint: 'Déjelo vacío para usar el del tipo',
+        onCommit: (v) => set((x) => (x.height = v)),
+        onClear: () => set((x) => delete x.height),
+      }),
+      shape !== 'area'
+        ? numField({
+            label: t.kind === 'wall' ? 'Espesor' : t.kind === 'pipe-ref' ? 'Diámetro' : 'Ancho',
+            q: 'length',
+            value: e.width,
+            placeholder: fmt('length', t.width, u),
+            allowEmpty: true,
+            min: 0.001,
+            key: 'el-w',
+            hint: 'Déjelo vacío para usar el del tipo',
+            onCommit: (v) => set((x) => (x.width = v)),
+            onClear: () => set((x) => delete x.width),
+          })
+        : null,
+      shape === 'line' ? readout([['Longitud', fmt('length', length, u, true)]]) : null,
+      shape === 'area' ? readout([['Área', fmt('area', area, u, true)]]) : null,
+    ),
+    h(
+      'section',
+      { class: 'section' },
+      h(
+        'div',
+        { class: 'btn-row' },
+        h('button', { class: 'btn outline small', onclick: () => openCatalog('elements', t.id) }, 'Ver el tipo en el catálogo'),
+        h(
+          'button',
+          {
+            class: 'btn outline small danger',
+            onclick: () => {
+              store.mutate((p) => deleteElement(p, id));
+              store.select(null);
+            },
+          },
+          'Eliminar',
         ),
       ),
     ),

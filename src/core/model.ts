@@ -2,6 +2,7 @@
  * Modelo de datos del proyecto. Es lo que se guarda en el archivo .rcad (JSON).
  * Todas las magnitudes se guardan en unidades US (ver units.ts).
  */
+import type { Catalog } from './catalog';
 import type { FittingType } from './fittings';
 import type { HazardId } from './hazards';
 import type { MaterialId, NominalSize } from './pipes';
@@ -74,6 +75,26 @@ export interface Sprinkler {
   /** Temperatura de activación °C (informativo) */
   temperatureC?: number;
   model?: string;
+  /** modelo del catálogo del que salió (si se eligió uno) */
+  modelId?: string;
+}
+
+/**
+ * Elemento del edificio (muro, columna, viga, losa, cielo, ducto, tubería de otro sistema).
+ * No entra en el cálculo hidráulico; sirve para ubicar la red y revisar choques.
+ */
+export interface BuildingElement {
+  id: string;
+  /** tipo en el catálogo */
+  typeId: string;
+  /** puntos en planta (ft): 1 para columna, 2 o más para muros/vigas/ductos, 3 o más para losas */
+  points: { x: number; y: number }[];
+  /** ft: base del muro/columna/losa, fondo de la viga, eje del ducto o tubería */
+  z: number;
+  /** sobrescribe la altura/espesor del tipo (ft) */
+  height?: number;
+  /** sobrescribe el ancho/espesor del tipo (ft) */
+  width?: number;
 }
 
 export interface DesignCriteria {
@@ -162,6 +183,10 @@ export interface Project {
   currency?: string;
   /** Longitud de los tubos comerciales por material (ft), si difiere del catálogo */
   stickLengths?: Partial<Record<MaterialId, number>>;
+  /** Tuberías, rociadores y elementos propios del usuario que usa este proyecto */
+  catalog?: Partial<Catalog>;
+  /** Muros, columnas, vigas, losas, ductos… */
+  elements?: BuildingElement[];
   /** Plano de fondo */
   underlay?: Underlay;
 }

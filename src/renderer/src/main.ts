@@ -15,9 +15,13 @@ import {
   exampleWarehouse,
   fmt,
   FILE_FORMAT_VERSION,
-  MATERIAL_IDS,
-  MATERIALS,
+  addElement,
+  applySprinklerModel,
+  deleteElement,
+  ELEMENT_KIND_SHAPE,
   PIPE_ROLE_NAMES,
+  pruneProjectCatalog,
+  putInProjectCatalog,
   sizeLabel,
   sizesFor,
   splitPipe,
@@ -29,6 +33,9 @@ import {
   type AttachedData,
 } from '../../core';
 import { renderBottom } from './bottomPanel';
+import { openCatalog } from './catalogDialog';
+import { adoptFromProject, catalogElements, catalogMaterials, catalogSprinklers, findElementType, findMaterial, findSprinklerModel } from './catalogStore';
+import { buildDxf } from '../../core';
 import { clear, h } from './dom';
 import { flash, numInput, selectInput } from './fields';
 import { renderInspector } from './inspector';
@@ -56,6 +63,8 @@ const I = {
   pdf: '<path d="M4 2h5l3 3v9H4z"/><path d="M6 9h4M6 11.5h4"/>',
   fit: '<path d="M2 6V2h4M10 2h4v4M14 10v4h-4M6 14H2v-4"/>',
   labels: '<path d="M2 4h8l4 4-4 4H2z"/>',
+  wall: '<path d="M2 13V5h12v8"/><path d="M2 9h12M6 5v4M10 9v4"/>',
+  book: '<path d="M3 3h4a2 2 0 012 2v9a2 2 0 00-2-2H3z"/><path d="M13 3H9a2 2 0 00-2 2"/><path d="M13 3v9H9"/>',
 };
 const svg = (paths: string) => `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" stroke-linecap="round">${paths}</svg>`;
 
@@ -167,7 +176,15 @@ function renderToolbar() {
       iconBtn(I.undo, 'Deshacer', () => store.undo(), { disabled: !store.canUndo }),
       iconBtn(I.redo, 'Rehacer', () => store.redo(), { disabled: !store.canRedo }),
     ),
-    h('div', { class: 'tb-group' }, tool('select', I.select, 'Seleccionar'), tool('draw', I.pipe, 'Dibujar tubería'), tool('sprinkler', I.head, 'Rociador')),
+    h(
+      'div',
+      { class: 'tb-group' },
+      tool('select', I.select, 'Seleccionar'),
+      tool('draw', I.pipe, 'Tubería'),
+      tool('sprinkler', I.head, 'Rociador'),
+      tool('element', I.wall, 'Elementos'),
+      iconBtn(I.book, 'Catálogo', () => openCatalog(), { showLabel: true }),
+    ),
     h(
       'div',
       { class: 'tb-group' },
@@ -226,6 +243,8 @@ function setTool(t: Tool) {
   store.setTool(t);
   drawStart = null;
   measure = { a: null, b: null };
+  elementPts = [];
+  elementId = null;
   viewer.setPreview(null, null);
   $('viewport').classList.toggle('drawing', t !== 'select');
   renderToolbar();
@@ -242,10 +261,10 @@ function renderToolOptions() {
     clear(
       el,
       h('span', null, 'Tubo nuevo'),
-      selectInput<NominalSize>('Diámetro', d.size, sizesFor(d.material).map((s) => ({ value: s, label: sizeLabel(s, metric) })), 'draw-size', (v) => (d.size = v)),
-      selectInput<MaterialId>('Material', d.material, MATERIAL_IDS.map((m) => ({ value: m, label: MATERIALS[m].name })), 'draw-mat', (v) => {
+      selectInput<NominalSize>('Diámetro', d.size, drawSizes().map((s) => ({ value: s, label: sizeLabel(s, metric) })), 'draw-size', (v) => (d.size = v)),
+      selectInput<MaterialId>('Material', d.material, catalogMaterials().map((m) => ({ value: m.id, label: m.name })), 'draw-mat', (v) => {
         d.material = v;
-        if (!sizesFor(v).includes(d.size)) d.size = sizesFor(v)[0];
+        if (!drawSizes().includes(d.size)) d.size = drawSizes()[0];
         renderToolOptions();
       }),
       selectInput<PipeRole>('Función', d.role, (Object.keys(PIPE_ROLE_NAMES) as PipeRole[]).map((k) => ({ value: k, label: PIPE_ROLE_NAMES[k] })), 'draw-role', (v) => (d.role = v)),
@@ -278,7 +297,32 @@ function renderToolOptions() {
   } else if (store.tool === 'move-plan') {
     clear(el, h('span', null, measure.a ? 'Mover plano: marque a dónde debe ir ese punto' : 'Mover plano: marque un punto del plano'), h('button', { class: 'btn outline small', onclick: () => setTool('select') }, 'Cancelar'));
   } else if (store.tool === 'sprinkler') {
-    clear(el, h('span', null, 'Rociador nuevo'), h('span', null, 'K'), numInput({ label: 'Factor K', q: 'kfactor', value: d.k, key: 'draw-k', min: 0.1, onCommit: (v) => (d.k = v) }));
+    clear(
+      el,
+      h('span', null, 'Rociador nuevo'),
+      selectInput<string>('Modelo', d.sprinklerModelId, catalogSprinklers().map((m) => ({ value: m.id, label: m.name })), 'draw-spk', (v) => (d.sprinklerModelId = v)),
+      h('button', { class: 'btn outline small', onclick: () => openCatalog('sprinklers') }, 'Catálogo'),
+    );
+  } else if (store.tool === 'element') {
+    const types = catalogElements();
+    if (!types.some((t) => t.id === d.elementTypeId)) d.elementTypeId = types[0].id;
+    const t = findElementType(d.elementTypeId)!;
+    const zLabel = t.kind === 'beam' ? 'Fondo' : t.kind === 'duct' || t.kind === 'pipe-ref' ? 'Eje a' : t.kind === 'ceiling' ? 'Altura' : 'Base';
+    clear(
+      el,
+      h('span', null, 'Elemento'),
+      selectInput<string>('Tipo de elemento', d.elementTypeId, types.map((x) => ({ value: x.id, label: x.name })), 'draw-el', (v) => {
+        d.elementTypeId = v;
+        elementPts = [];
+        elementId = null;
+        viewer.setPreview(null, null);
+        renderToolOptions();
+        renderHint();
+      }),
+      h('span', null, zLabel),
+      numInput({ label: 'Elevación del elemento', q: 'elevation', value: d.elementZ, key: 'draw-elz', onCommit: (v) => (d.elementZ = v) }),
+      h('button', { class: 'btn outline small', onclick: () => openCatalog('elements') }, 'Catálogo'),
+    );
   } else {
     clear(el);
   }
@@ -291,6 +335,7 @@ function renderHint() {
       ? 'Clic para el siguiente punto. Alt desactiva el ajuste a 45°. Esc o clic derecho termina.'
       : 'Clic en un nodo, un tubo o un punto vacío para empezar a dibujar.',
     sprinkler: 'Clic en un nodo o sobre un tubo para colocar un rociador.',
+    element: elementHint(),
     calibrate:
       store.project.underlay?.kind === 'dxf'
         ? 'El cursor se ajusta a los extremos de las líneas del DXF. Esc cancela.'
@@ -381,6 +426,8 @@ function onDrawClick(ev: PointerEvent) {
     const d = store.drawDefaults;
     store.mutate((p) => {
       endId = materialize(p, t);
+      const mat = findMaterial(d.material);
+      if (mat) putInProjectCatalog(p, 'materials', mat);
       pipeId = addPipe(p, from, endId, { size: d.size, material: d.material, role: d.role }).id;
     });
     store.select({ kind: 'pipe', id: pipeId });
@@ -391,6 +438,131 @@ function onDrawClick(ev: PointerEvent) {
   renderToolOptions();
 }
 
+/** Pone un rociador del modelo elegido en un nodo y devuelve su id */
+function placeSprinkler(p: Project, nodeId: string): string {
+  const s = addSprinkler(p, nodeId, 5.6);
+  const model = findSprinklerModel(store.drawDefaults.sprinklerModelId);
+  if (model) {
+    putInProjectCatalog(p, 'sprinklers', model);
+    applySprinklerModel(s, model);
+  }
+  return s.id;
+}
+
+/** Diámetros disponibles para el material elegido en la herramienta de tubería */
+function drawSizes(): NominalSize[] {
+  const m = findMaterial(store.drawDefaults.material);
+  return m ? sizesFor(m.id, { catalog: { materials: [m] } }) : sizesFor('steel-sch40');
+}
+
+// ---------- Elementos del edificio ----------
+let elementPts: THREE.Vector3[] = [];
+let elementId: string | null = null;
+
+function elementHint(): string {
+  const t = findElementType(store.drawDefaults.elementTypeId);
+  const shape = t ? ELEMENT_KIND_SHAPE[t.kind] : 'line';
+  if (shape === 'point') return 'Clic donde va cada columna. Esc termina.';
+  if (shape === 'area') return elementPts.length ? 'Clic en cada esquina. Clic en el primer punto, Enter o clic derecho para cerrar.' : 'Clic en la primera esquina.';
+  return elementPts.length ? 'Clic para el siguiente punto. Alt desactiva el ajuste a 45°. Esc o clic derecho termina.' : 'Clic en el punto de inicio.';
+}
+
+function endElement() {
+  const t = findElementType(store.drawDefaults.elementTypeId);
+  if (t && ELEMENT_KIND_SHAPE[t.kind] === 'area' && elementPts.length >= 3) closeArea();
+  elementPts = [];
+  elementId = null;
+  viewer.setPreview(null, null);
+  renderHint();
+}
+
+function closeArea() {
+  const pts = elementPts.map((v) => ({ x: v.x, y: v.y }));
+  const type = findElementType(store.drawDefaults.elementTypeId);
+  if (!type) return;
+  let id = '';
+  store.mutate((p) => {
+    putInProjectCatalog(p, 'elements', type);
+    id = addElement(p, type.id, pts, store.drawDefaults.elementZ).id;
+  });
+  store.select({ kind: 'element', id });
+  elementPts = [];
+}
+
+function elementTarget(ev: PointerEvent | MouseEvent): { point: THREE.Vector3; snapped: boolean } | null {
+  const z = store.drawDefaults.elementZ;
+  const rect = viewer.renderer.domElement.getBoundingClientRect();
+  const near = (x: number, y: number, wz: number) => {
+    const sp = viewer.toScreen(new THREE.Vector3(x, y, wz));
+    return Math.hypot(sp.x - (ev.clientX - rect.left), sp.y - (ev.clientY - rect.top)) < 12;
+  };
+  // cerrar una losa en su primer punto
+  if (elementPts.length >= 3 && near(elementPts[0].x, elementPts[0].y, z)) return { point: elementPts[0].clone(), snapped: true };
+  // vértices de otros elementos
+  for (const e of store.project.elements ?? []) for (const q of e.points) if (near(q.x, q.y, e.z)) return { point: new THREE.Vector3(q.x, q.y, z), snapped: true };
+  // plano DXF
+  const ps = viewer.underlaySnap(ev);
+  if (ps) return { point: new THREE.Vector3(ps.x, ps.y, z), snapped: true };
+  const p = viewer.planePoint(ev, z);
+  if (!p) return null;
+  const grid = store.drawDefaults.gridFt;
+  const snap = (v: number) => (grid > 0 ? Math.round(v / grid) * grid : v);
+  const last = elementPts[elementPts.length - 1];
+  if (!last) return { point: new THREE.Vector3(snap(p.x), snap(p.y), z), snapped: false };
+  let ang = Math.atan2(p.y - last.y, p.x - last.x);
+  if (!ev.altKey) ang = Math.round(ang / (Math.PI / 4)) * (Math.PI / 4);
+  const len = snap(Math.hypot(p.x - last.x, p.y - last.y));
+  return { point: new THREE.Vector3(last.x + len * Math.cos(ang), last.y + len * Math.sin(ang), z), snapped: false };
+}
+
+function onElementClick(ev: PointerEvent) {
+  const t = elementTarget(ev);
+  const type = findElementType(store.drawDefaults.elementTypeId);
+  if (!t || !type) return;
+  const shape = ELEMENT_KIND_SHAPE[type.kind];
+  const z = store.drawDefaults.elementZ;
+  if (shape === 'point') {
+    let id = '';
+    store.mutate((p) => {
+      putInProjectCatalog(p, 'elements', type);
+      id = addElement(p, type.id, [{ x: t.point.x, y: t.point.y }], z).id;
+    });
+    store.select({ kind: 'element', id });
+    return;
+  }
+  if (shape === 'area') {
+    if (elementPts.length >= 3 && t.point.distanceTo(elementPts[0]) < 1e-6) {
+      closeArea();
+      viewer.setPreview(null, null);
+      renderHint();
+      return;
+    }
+    elementPts.push(t.point);
+    renderHint();
+    return;
+  }
+  // línea: muros, vigas, ductos y tuberías de otros sistemas
+  const last = elementPts[elementPts.length - 1];
+  if (last && t.point.distanceTo(last) < 1e-6) return;
+  elementPts.push(t.point);
+  if (elementPts.length === 2) {
+    let id = '';
+    store.mutate((p) => {
+      putInProjectCatalog(p, 'elements', type);
+      id = addElement(p, type.id, elementPts.map((v) => ({ x: v.x, y: v.y })), z).id;
+    });
+    elementId = id;
+    store.select({ kind: 'element', id });
+  } else if (elementPts.length > 2 && elementId) {
+    const id = elementId;
+    store.mutate((p) => {
+      const el = (p.elements ?? []).find((x) => x.id === id);
+      if (el) el.points.push({ x: t.point.x, y: t.point.y });
+    });
+  }
+  renderHint();
+}
+
 function onSprinklerClick(ev: PointerEvent) {
   const hit = viewer.pick(ev);
   if (!hit) return;
@@ -399,12 +571,14 @@ function onSprinklerClick(ev: PointerEvent) {
   if (hit.kind === 'node') {
     const existing = store.project.sprinklers.find((s) => s.nodeId === hit.id);
     if (existing) return store.select({ kind: 'sprinkler', id: existing.id });
-    store.mutate((p) => (sid = addSprinkler(p, hit.id, store.drawDefaults.k).id));
-  } else {
+    store.mutate((p) => (sid = placeSprinkler(p, hit.id)));
+  } else if (hit.kind === 'pipe') {
     store.mutate((p) => {
       const node = splitPipe(p, hit.id, hit.point.x, hit.point.y, hit.point.z);
-      if (node) sid = addSprinkler(p, node.id, store.drawDefaults.k).id;
+      if (node) sid = placeSprinkler(p, node.id);
     });
+  } else {
+    return;
   }
   if (sid) store.select({ kind: 'sprinkler', id: sid });
 }
@@ -417,6 +591,7 @@ canvas.addEventListener('pointerup', (e) => {
   down = null;
   if (e.button === 2) {
     if (store.tool === 'calibrate' || store.tool === 'move-plan') return setTool('select');
+    if (store.tool === 'element') return endElement();
     if (store.tool === 'draw' && drawStart) {
       drawStart = null;
       viewer.setPreview(null, null);
@@ -428,6 +603,7 @@ canvas.addEventListener('pointerup', (e) => {
   if (store.tool === 'draw') return onDrawClick(e);
   if (store.tool === 'calibrate' || store.tool === 'move-plan') return onMeasureClick(e);
   if (store.tool === 'sprinkler') return onSprinklerClick(e);
+  if (store.tool === 'element') return onElementClick(e);
   const hit = viewer.pick(e);
   store.select(hit ? { kind: hit.kind, id: hit.id } : null);
 });
@@ -438,6 +614,13 @@ canvas.addEventListener('pointermove', (e) => {
     const t = measureTarget(e);
     viewer.setPreview(measure.a, t?.point ?? null, !!t?.snapped);
     if (t && measure.a) $('hint').textContent = `Distancia ${fmt('length', t.point.distanceTo(measure.a), store.project.displayUnits, true)}`;
+    return;
+  }
+  if (store.tool === 'element') {
+    const t = elementTarget(e);
+    const last = elementPts[elementPts.length - 1] ?? null;
+    viewer.setPreview(last, t?.point ?? null, !!t?.snapped, elementPts);
+    if (t && last) $('hint').textContent = `Longitud ${fmt('length', t.point.distanceTo(last), store.project.displayUnits, true)}. ${elementHint()}`;
     return;
   }
   if (store.tool !== 'draw') return;
@@ -626,7 +809,9 @@ function normalize(raw: unknown): { project: Project; attached: Record<string, A
 
 /** Texto del archivo .rcad: el proyecto más los datos del plano de fondo */
 function projectFileContent(): string {
-  const file: ProjectFile = { ...store.project };
+  const copy: Project = JSON.parse(JSON.stringify(store.project));
+  pruneProjectCatalog(copy);
+  const file: ProjectFile = copy;
   const u = store.project.underlay;
   const data = u ? store.attached.get(u.dataId) : undefined;
   if (u && data) file.underlayData = { [u.dataId]: data };
@@ -695,6 +880,15 @@ const actions = {
     flash('Proyecto guardado');
     return true;
   },
+  async exportDxf() {
+    const content = buildDxf(store.project, viewer.dxfExportFrame());
+    if (desktop) {
+      const r = await desktop.saveFile({ content, suggestedName: fileBaseName(), kind: 'dxf' });
+      if (r) flash('Dibujo DXF exportado');
+    } else {
+      download(new Blob([content], { type: 'image/vnd.dxf' }), `${fileBaseName()}.dxf`);
+    }
+  },
   async exportPdf() {
     store.recalcNow();
     const image = viewer.snapshot();
@@ -730,6 +924,7 @@ function deleteSelection() {
   store.mutate((p) => {
     if (s.kind === 'pipe') deletePipe(p, s.id);
     else if (s.kind === 'node') deleteNode(p, s.id);
+    else if (s.kind === 'element') deleteElement(p, s.id);
     else deleteSprinkler(p, s.id);
   });
   store.select(null);
@@ -753,6 +948,10 @@ desktop?.onMenu(async (action) => {
       return actions.exportPdf();
     case 'load-plan':
       return planHooks.load();
+    case 'catalog':
+      return openCatalog();
+    case 'export-dxf':
+      return actions.exportDxf();
     case 'example-tree':
       return actions.example('tree');
     case 'example-grid':
@@ -782,8 +981,15 @@ function isTyping() {
 window.addEventListener('keydown', (e) => {
   if (isTyping()) return;
   const mod = e.ctrlKey || e.metaKey;
-  if (e.key === 'Escape') {
-    if (store.tool === 'draw' && drawStart) {
+  if (e.key === 'Enter' && store.tool === 'element' && elementPts.length) {
+    endElement();
+  } else if (e.key === 'Escape') {
+    if (store.tool === 'element' && elementPts.length) {
+      elementPts = [];
+      elementId = null;
+      viewer.setPreview(null, null);
+      renderHint();
+    } else if (store.tool === 'draw' && drawStart) {
       drawStart = null;
       viewer.setPreview(null, null);
       renderHint();
@@ -805,9 +1011,16 @@ window.addEventListener('keydown', (e) => {
   } else if (!mod && e.key.toLowerCase() === 'v') setTool('select');
   else if (!mod && e.key.toLowerCase() === 't') setTool('draw');
   else if (!mod && e.key.toLowerCase() === 'r') setTool('sprinkler');
+  else if (!mod && e.key.toLowerCase() === 'e') setTool('element');
 });
 
 // ---------- Barra de estado ----------
+let updateText = '';
+desktop?.onUpdateStatus((t) => {
+  updateText = t;
+  renderStatus();
+});
+
 function renderStatus() {
   const p = store.project;
   const r = store.result;
@@ -820,6 +1033,7 @@ function renderStatus() {
     h('span', null, `${p.sprinklers.length} rociadores`),
     r.ok ? h('span', null, `${fmt('length', totalLen, u, true)} de tubería conectada`) : null,
     h('span', { class: 'spacer' }),
+    updateText ? h('span', { class: 'update-status' }, updateText) : null,
     h('span', null, store.fileName ?? 'Sin guardar'),
     h('span', null, `v${appVersion}`),
   );
@@ -842,6 +1056,7 @@ store.subscribe((why) => {
     return;
   }
   // result o file
+  if (why === 'file') adoptFromProject(store.project);
   rebuildViewer();
   renderToolbar();
   renderLeft($('left'));

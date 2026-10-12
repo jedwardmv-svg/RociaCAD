@@ -3,8 +3,9 @@
  */
 import { calculate } from './calculate';
 import { HAZARDS } from './hazards';
-import { nextId, type Node, type Pipe, type Project, type Sprinkler } from './model';
-import { MATERIALS } from './pipes';
+import type { Catalog, SprinklerModel } from './catalog';
+import { nextId, type BuildingElement, type Node, type Pipe, type Project, type Sprinkler } from './model';
+import { getMaterial } from './pipes';
 
 export function findNode(p: Project, id: string): Node | undefined {
   return p.nodes.find((n) => n.id === id);
@@ -21,7 +22,7 @@ export function addPipe(p: Project, from: string, to: string, props: Pick<Pipe, 
     id: nextId('T', p.pipes),
     from,
     to,
-    c: props.c ?? MATERIALS[props.material].cWet,
+    c: props.c ?? getMaterial(props.material, p).cWet,
     fittings: [],
     ...props,
   };
@@ -141,4 +142,53 @@ export function suggestDesignArea(p: Project): string[] {
     .sort((a, b) => a.pressure - a.requiredPressure - (b.pressure - b.requiredPressure))
     .slice(0, n)
     .map((s) => s.id);
+}
+
+// ---------- Elementos del edificio ----------
+
+export function addElement(p: Project, typeId: string, points: { x: number; y: number }[], z: number): BuildingElement {
+  const el: BuildingElement = { id: nextId('E', p.elements ?? []), typeId, points: points.map((q) => ({ x: q.x, y: q.y })), z };
+  p.elements = [...(p.elements ?? []), el];
+  return el;
+}
+
+export function deleteElement(p: Project, id: string) {
+  p.elements = (p.elements ?? []).filter((e) => e.id !== id);
+}
+
+// ---------- Catálogo ----------
+
+/** Aplica a un rociador los datos de un modelo del catálogo. */
+export function applySprinklerModel(s: Sprinkler, model: SprinklerModel) {
+  s.modelId = model.id;
+  s.k = model.k;
+  s.orientation = model.orientation;
+  if (model.temperatureC !== undefined) s.temperatureC = model.temperatureC;
+  s.model = model.builtIn ? undefined : [model.manufacturer, model.model].filter(Boolean).join(' ') || model.name;
+}
+
+type CatalogKey = keyof Catalog;
+
+/**
+ * Deja una copia de un ítem propio dentro del proyecto (para que el archivo sea autónomo).
+ * Los de fábrica no se copian. Si ya hay uno con el mismo id, se reemplaza por la versión dada.
+ */
+export function putInProjectCatalog<K extends CatalogKey>(p: Project, key: K, item: Catalog[K][number]) {
+  if ((item as { builtIn?: boolean }).builtIn) return;
+  const cat = (p.catalog ??= {});
+  const list = ((cat[key] as Catalog[K] | undefined) ?? []).filter((x) => x.id !== item.id) as Catalog[K];
+  (list as unknown[]).push({ ...item });
+  (cat as Record<string, unknown>)[key] = list;
+}
+
+/** Quita del catálogo del proyecto los ítems propios que ya nadie usa. */
+export function pruneProjectCatalog(p: Project) {
+  const cat = p.catalog;
+  if (!cat) return;
+  const usedMat = new Set(p.pipes.map((x) => x.material));
+  const usedSpk = new Set(p.sprinklers.map((x) => x.modelId).filter(Boolean));
+  const usedEl = new Set((p.elements ?? []).map((x) => x.typeId));
+  if (cat.materials) cat.materials = cat.materials.filter((x) => usedMat.has(x.id));
+  if (cat.sprinklers) cat.sprinklers = cat.sprinklers.filter((x) => usedSpk.has(x.id));
+  if (cat.elements) cat.elements = cat.elements.filter((x) => usedEl.has(x.id));
 }

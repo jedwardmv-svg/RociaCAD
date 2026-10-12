@@ -8,7 +8,7 @@
  */
 import { FITTING_NAMES, VALVE_TYPES } from './fittings';
 import { ORIENTATION_NAMES, type Project } from './model';
-import { MATERIALS, NOMINAL_SIZES, sizeLabel, type MaterialId, type NominalSize } from './pipes';
+import { getMaterial, NOMINAL_SIZES, sizeLabel, type MaterialId, type NominalSize } from './pipes';
 import { pipeGeometry } from './calculate';
 
 export type BomCategory = 'Tubería' | 'Accesorios' | 'Válvulas' | 'Rociadores';
@@ -71,9 +71,10 @@ export function buildBom(project: Project): Bom {
     lengthBy.set(k, cur);
   }
   for (const { material, size, ft } of lengthBy.values()) {
-    const stick = project.stickLengths?.[material] ?? MATERIALS[material].stickLengthFt;
+    const mat = getMaterial(material, project);
+    const stick = project.stickLengths?.[material] ?? mat.stickLengthFt;
     const sticks = Math.ceil(ft / stick - 1e-9);
-    add(`pipe|${material}|${size}`, 'Tubería', `Tubo ${MATERIALS[material].name} ${sz(size)}`, sticks, 'tubo', ft);
+    add(`pipe|${material}|${size}`, 'Tubería', `Tubo ${mat.name} ${sz(size)}`, sticks, 'tubo', ft);
   }
 
   // --- Accesorios por geometría

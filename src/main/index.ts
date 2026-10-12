@@ -4,8 +4,15 @@
 import { app, BrowserWindow, dialog, ipcMain, Menu, shell, type MenuItemConstructorOptions } from 'electron';
 import { readFile, writeFile } from 'node:fs/promises';
 import { basename, join } from 'node:path';
+import { checkForUpdates, initUpdater, installIfRequested, loadSettings, saveSettings } from './updater';
 
-const FILE_FILTERS = [{ name: 'Proyecto RociaCAD', extensions: ['rcad'] }];
+type FileKind = 'project' | 'catalog' | 'dxf';
+const KINDS: Record<FileKind, { name: string; ext: string; fallback: string }> = {
+  project: { name: 'Proyecto RociaCAD', ext: 'rcad', fallback: 'proyecto' },
+  catalog: { name: 'Catálogo RociaCAD', ext: 'rcatalogo', fallback: 'catalogo' },
+  dxf: { name: 'Dibujo DXF', ext: 'dxf', fallback: 'dibujo' },
+};
+const filtersFor = (kind: FileKind) => [{ name: KINDS[kind].name, extensions: [KINDS[kind].ext] }];
 
 let win: BrowserWindow | null = null;
 let dirty = false;
@@ -89,6 +96,7 @@ function buildMenu() {
         { type: 'separator' },
         item('Cargar plano de fondo (DXF, PDF o imagen)…', 'load-plan', 'CmdOrCtrl+L'),
         item('Exportar reporte PDF…', 'export-pdf', 'CmdOrCtrl+P'),
+        item('Exportar dibujo DXF (para AutoCAD)…', 'export-dxf', 'CmdOrCtrl+E'),
         { type: 'separator' },
         {
           label: 'Ejemplos',
@@ -107,6 +115,8 @@ function buildMenu() {
         { role: 'copy', label: 'Copiar' },
         { role: 'paste', label: 'Pegar' },
         { role: 'selectAll', label: 'Seleccionar todo' },
+        { type: 'separator' },
+        item('Catálogo de tuberías, rociadores y elementos…', 'catalog', 'CmdOrCtrl+K'),
       ],
     },
     {
@@ -128,6 +138,13 @@ function buildMenu() {
       label: 'Ayuda',
       submenu: [
         item('Acerca de RociaCAD', 'about'),
+        { label: 'Buscar actualizaciones…', click: () => checkForUpdates(true) },
+        {
+          label: 'Buscar actualizaciones al iniciar',
+          type: 'checkbox',
+          checked: loadSettings().checkOnStart,
+          click: (mi) => saveSettings({ ...loadSettings(), checkOnStart: mi.checked }),
+        },
         {
           label: 'Página del proyecto',
           click: () => shell.openExternal('https://github.com/jedwardmv-svg/RociaCAD'),
@@ -140,22 +157,23 @@ function buildMenu() {
 
 // ---------- IPC ----------
 
-ipcMain.handle('file:open', async () => {
+ipcMain.handle('file:open', async (_e, kind: FileKind = 'project') => {
   if (!win) return null;
-  const r = await dialog.showOpenDialog(win, { filters: FILE_FILTERS, properties: ['openFile'] });
+  const r = await dialog.showOpenDialog(win, { filters: filtersFor(KINDS[kind] ? kind : 'project'), properties: ['openFile'] });
   if (r.canceled || !r.filePaths[0]) return null;
   const path = r.filePaths[0];
   const content = await readFile(path, 'utf8');
   return { path, name: basename(path), content };
 });
 
-ipcMain.handle('file:save', async (_e, args: { path?: string; content: string; suggestedName?: string }) => {
+ipcMain.handle('file:save', async (_e, args: { path?: string; content: string; suggestedName?: string; kind?: FileKind }) => {
   if (!win) return null;
-  let path = args.path;
+  const kind = args.kind && KINDS[args.kind] ? args.kind : 'project';
+  let path = args.kind === 'project' || !args.kind ? args.path : undefined;
   if (!path) {
     const r = await dialog.showSaveDialog(win, {
-      filters: FILE_FILTERS,
-      defaultPath: (args.suggestedName || 'proyecto') + '.rcad',
+      filters: filtersFor(kind),
+      defaultPath: (args.suggestedName || KINDS[kind].fallback) + '.' + KINDS[kind].ext,
     });
     if (r.canceled || !r.filePath) return null;
     path = r.filePath;
@@ -217,11 +235,13 @@ ipcMain.handle('app:confirm', async (_e, args: { message: string; detail?: strin
 app.whenReady().then(() => {
   buildMenu();
   createWindow();
+  initUpdater(() => (win && !win.isDestroyed() ? win : null));
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
 });
 
 app.on('window-all-closed', () => {
+  if (installIfRequested()) return;
   if (process.platform !== 'darwin') app.quit();
 });

@@ -1,7 +1,7 @@
 {
   "name": "rociacad",
   "productName": "RociaCAD",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Diseño y cálculo hidráulico de sistemas de rociadores contra incendio (NFPA 13), con vista 3D.",
   "main": "./out/main/index.js",
   "author": "Jhon Edward Marquez Valencia",
@@ -20,18 +20,20 @@
     "dist:linux": "npm run build && electron-builder --linux"
   },
   "dependencies": {
-    "@fontsource/barlow": "^5.3.0",
-    "@fontsource/barlow-semi-condensed": "^5.3.0",
-    "dxf-parser": "^1.1.2",
-    "pdfjs-dist": "^6.4.299",
-    "three": "^0.186.1"
+    "electron-updater": "^6.8.9"
   },
   "devDependencies": {
+    "@fontsource/barlow": "^5.3.0",
+    "@fontsource/barlow-semi-condensed": "^5.3.0",
+    "@tarikjabiri/dxf": "^2.9.0",
     "@types/node": "^22.10.0",
     "@types/three": "^0.186.0",
+    "dxf-parser": "^1.1.2",
     "electron": "^44.7.0",
     "electron-builder": "^26.15.3",
     "electron-vite": "^5.0.0",
+    "pdfjs-dist": "^6.4.299",
+    "three": "^0.186.1",
     "typescript": "^5.9.3",
     "vite": "^7.3.7",
     "vitest": "^4.0.0"

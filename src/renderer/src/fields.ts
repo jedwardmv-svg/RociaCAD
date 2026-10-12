@@ -20,6 +20,7 @@ export interface NumFieldOpts {
   hint?: string;
   allowEmpty?: boolean;
   onClear?: () => void;
+  disabled?: boolean;
 }
 
 export function numInput(o: NumFieldOpts): HTMLElement {
@@ -33,6 +34,7 @@ export function numInput(o: NumFieldOpts): HTMLElement {
     placeholder: o.placeholder ?? '',
     'data-key': o.key,
     'aria-label': o.label,
+    disabled: o.disabled,
   });
   const commit = () => {
     const raw = input.value.trim();

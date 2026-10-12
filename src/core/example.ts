@@ -104,6 +104,7 @@ export function exampleWarehouse(): Project {
         inDesignArea: inArea,
         orientation: 'pendent',
         temperatureC: 68,
+        modelId: 'gen-k56-pend',
       });
       prev = bn;
     }
@@ -165,6 +166,7 @@ export function exampleGrid(): Project {
         coverage: (sp * sp) / (CONV.FT_TO_M * CONV.FT_TO_M),
         inDesignArea: (b >= nb - 3 && s >= 1 && s <= 4) || (b === nb - 1 && s === 5),
         orientation: 'upright',
+        modelId: 'gen-k56-up',
       });
       prev = id;
     }

@@ -2,7 +2,7 @@
  * Reporte de cálculo hidráulico para imprimir o exportar a PDF.
  * Se arma dentro de #print-root; los estilos de impresión ocultan la app y muestran solo esto.
  */
-import { fmt, HAZARD_NAMES, internalDiameter, MATERIALS, ORIENTATION_NAMES, sizeLabel, unitLabel, type Quantity } from '../../core';
+import { fmt, getMaterial, HAZARD_NAMES, internalDiameter, ORIENTATION_NAMES, sizeLabel, unitLabel, type Quantity } from '../../core';
 import { clear, h } from './dom';
 import { store } from './state';
 import { supplyChartSvg } from './supplyChart';
@@ -111,7 +111,7 @@ export function buildReport(root: HTMLElement, opts: { image?: string; version: 
             pp.id,
             `${pr.downstream} – ${pr.upstream}`,
             sizeLabel(pp.size, metric),
-            fmt('diameter', pp.idOverride ?? internalDiameter(pp.material, pp.size) ?? NaN, u),
+            fmt('diameter', pp.idOverride ?? internalDiameter(pp.material, pp.size, p) ?? NaN, u),
             String(pp.c),
             fmt('flow', Math.abs(pr.flow), u),
             fmt('length', pr.lengthFt, u),
@@ -164,7 +164,7 @@ export function buildReport(root: HTMLElement, opts: { image?: string; version: 
       h(
         'p',
         { class: 'r-note' },
-        `Tubería: ${[...new Set(p.pipes.map((x) => MATERIALS[x.material].name))].join(', ')}. Rociadores: ${[...new Set(p.sprinklers.map((x) => ORIENTATION_NAMES[x.orientation].toLowerCase()))].join(', ')}.`,
+        `Tubería: ${[...new Set(p.pipes.map((x) => getMaterial(x.material, p).name))].join(', ')}. Rociadores: ${[...new Set(p.sprinklers.map((x) => ORIENTATION_NAMES[x.orientation].toLowerCase()))].join(', ')}.`,
       ),
     ),
   );

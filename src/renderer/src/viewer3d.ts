@@ -4,7 +4,17 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { CSS2DObject, CSS2DRenderer } from 'three/examples/jsm/renderers/CSS2DRenderer.js';
-import { fmt, MATERIALS, NOMINAL_SIZES, sizeLabel, type CalcResult, type NominalSize, type Project } from '../../core';
+import {
+  ELEMENT_KIND_SHAPE,
+  fmt,
+  getElementType,
+  getMaterial,
+  NOMINAL_SIZES,
+  sizeLabel,
+  type CalcResult,
+  type NominalSize,
+  type Project,
+} from '../../core';
 import type { ColorMode, Selection } from './state';
 import type { Underlay } from '../../core';
 import type { UnderlayAsset } from './underlay';
@@ -12,7 +22,7 @@ import type { UnderlayAsset } from './underlay';
 export type ViewName = '3d' | 'top' | 'front' | 'side';
 
 export interface Hit {
-  kind: 'node' | 'pipe' | 'sprinkler';
+  kind: 'node' | 'pipe' | 'sprinkler' | 'element';
   id: string;
   point: THREE.Vector3;
 }
@@ -181,6 +191,8 @@ export class Viewer {
       this.model.remove(obj);
       obj.traverse((o) => {
         if (o instanceof CSS2DObject) o.element.remove();
+        // liberar la geometría propia de cada objeto (las compartidas se reutilizan)
+        if (o instanceof THREE.Mesh && o.geometry !== this.unitCylinder && o.geometry !== this.sphere) o.geometry.dispose();
       });
     }
     this.pickables = [];
@@ -191,6 +203,7 @@ export class Viewer {
     const nodes = new Map(project.nodes.map((n) => [n.id, n]));
     const box = new THREE.Box3();
     for (const n of project.nodes) box.expandByPoint(new THREE.Vector3(n.x, n.y, n.z));
+    for (const e of project.elements ?? []) for (const q of e.points) box.expandByPoint(new THREE.Vector3(q.x, q.y, e.z));
     if (box.isEmpty()) box.set(new THREE.Vector3(-10, -10, 0), new THREE.Vector3(10, 10, 10));
     this.modelBounds = box;
     this.bounds = this.combinedBounds();
@@ -222,7 +235,7 @@ export class Viewer {
         if (pr.velocity > vMax) return new THREE.Color('#ff3df0');
         return rampColor(pr.velocity / vMax);
       }
-      return new THREE.Color(material === 'cpvc' ? COLORS.cpvc : COLORS.steel);
+      return new THREE.Color(getMaterial(material, project).color ?? COLORS.steel);
     };
 
     // --- Tubos
@@ -314,9 +327,10 @@ export class Viewer {
     // --- Leyenda
     if (mode === 'material') {
       this.legendTitle = 'Material';
-      const mats = new Set(project.pipes.map((p) => p.material));
-      if ([...mats].some((m) => m !== 'cpvc')) this.legend.push({ color: '#c8102e', label: 'Acero' });
-      if (mats.has('cpvc')) this.legend.push({ color: '#e58a3a', label: MATERIALS.cpvc.name });
+      for (const id of new Set(project.pipes.map((p) => p.material))) {
+        const m = getMaterial(id, project);
+        this.legend.push({ color: m.color ?? '#c8102e', label: m.name });
+      }
     } else if (mode === 'size') {
       this.legendTitle = 'Diámetro';
       for (const s of NOMINAL_SIZES) if (sizesUsed.has(s)) this.legend.push({ color: SIZE_COLORS[s]!, label: sizeLabel(s, metric) });
@@ -334,6 +348,7 @@ export class Viewer {
       this.legend.push({ color: '#ff3df0', label: 'sobre el límite' });
     }
 
+    this.buildElements(project);
     this.rebuildGrid(metric);
     this.applySelection(selection);
   }
@@ -537,6 +552,58 @@ export class Viewer {
     this.setPreview(a, b, false);
   }
 
+  /** Muros, columnas, vigas, losas, cielos, ductos y tuberías de otros sistemas */
+  private buildElements(project: Project) {
+    const up = new THREE.Vector3(0, 1, 0);
+    for (const e of project.elements ?? []) {
+      const t = getElementType(e.typeId, project);
+      const w = e.width ?? t.width;
+      const hh = e.height ?? t.height;
+      const shape = ELEMENT_KIND_SHAPE[t.kind];
+      const area = shape === 'area';
+      const mat = this.mat(t.color, { transparent: true, opacity: area ? 0.3 : t.kind === 'wall' ? 0.55 : 0.75, depthWrite: !area && t.kind !== 'wall', roughness: 0.9, metalness: 0 });
+      const add = (mesh: THREE.Mesh) => {
+        mesh.renderOrder = area ? -0.5 : 0;
+        this.register(mesh, 'element', e.id);
+        this.model.add(mesh);
+      };
+      if (shape === 'point') {
+        const q = e.points[0];
+        if (!q) continue;
+        const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, w, hh), mat);
+        mesh.position.set(q.x, q.y, e.z + hh / 2);
+        add(mesh);
+      } else if (shape === 'line') {
+        for (let i = 0; i + 1 < e.points.length; i++) {
+          const a = new THREE.Vector3(e.points[i].x, e.points[i].y, 0);
+          const b = new THREE.Vector3(e.points[i + 1].x, e.points[i + 1].y, 0);
+          const len = a.distanceTo(b);
+          if (len < 1e-6) continue;
+          const centerZ = t.kind === 'duct' || t.kind === 'pipe-ref' ? e.z : e.z + hh / 2;
+          let mesh: THREE.Mesh;
+          if (t.kind === 'pipe-ref') {
+            mesh = new THREE.Mesh(this.unitCylinder, mat);
+            mesh.scale.set(w / 2, len, w / 2);
+            mesh.quaternion.setFromUnitVectors(up, b.clone().sub(a).normalize());
+          } else {
+            // los muros se alargan medio espesor en cada punta para que las esquinas cierren
+            const ext = t.kind === 'wall' ? w : 0;
+            mesh = new THREE.Mesh(new THREE.BoxGeometry(len + ext, w, hh), mat);
+            mesh.rotation.z = Math.atan2(b.y - a.y, b.x - a.x);
+          }
+          mesh.position.set((a.x + b.x) / 2, (a.y + b.y) / 2, centerZ);
+          add(mesh);
+        }
+      } else if (e.points.length >= 3) {
+        const shp = new THREE.Shape(e.points.map((q) => new THREE.Vector2(q.x, q.y)));
+        const geo = new THREE.ExtrudeGeometry(shp, { depth: hh, bevelEnabled: false });
+        const mesh = new THREE.Mesh(geo, mat);
+        mesh.position.z = e.z;
+        add(mesh);
+      }
+    }
+  }
+
   applySelection(sel: Selection) {
     for (const [mesh, m] of this.baseMaterial) mesh.material = m;
     if (!sel) return;
@@ -550,10 +617,16 @@ export class Viewer {
     const ray = this.rayFrom(ev);
     const hits = ray.intersectObjects(this.pickables, false);
     if (!hits.length) return null;
-    const first = hits[0];
+    // los elementos del edificio solo se eligen si no hay tubería ni rociadores bajo el puntero
+    const network = hits.filter((x) => x.object.userData.kind !== 'element');
+    if (!network.length) {
+      const e = hits[0];
+      return { kind: 'element', id: e.object.userData.id, point: e.point.clone() };
+    }
+    const first = network[0];
     const nearDist = first.distance;
     // preferir nodo/rociador si está casi a la misma distancia que el tubo
-    const pref = hits.find(
+    const pref = network.find(
       (h) => (h.object.userData.kind === 'sprinkler' || h.object.userData.kind === 'node') && h.distance - nearDist < 1.0,
     );
     const h = pref ?? first;
@@ -583,8 +656,8 @@ export class Viewer {
     return { x: ((v.x + 1) / 2) * rect.width, y: ((1 - v.y) / 2) * rect.height };
   }
 
-  /** Línea de vista previa del dibujo y marca del cursor. */
-  setPreview(from: THREE.Vector3 | null, to: THREE.Vector3 | null, snappedToNode = false) {
+  /** Línea de vista previa del dibujo, marca del cursor y (opcional) el trazo ya marcado. */
+  setPreview(from: THREE.Vector3 | null, to: THREE.Vector3 | null, snappedToNode = false, path: THREE.Vector3[] = []) {
     this.overlay.clear();
     if (to) {
       const marker = new THREE.Mesh(
@@ -596,12 +669,23 @@ export class Viewer {
       marker.position.copy(to);
       this.overlay.add(marker);
     }
-    if (from && to) {
-      const geo = new THREE.BufferGeometry().setFromPoints([from, to]);
-      const line = new THREE.Line(geo, new THREE.LineBasicMaterial({ color: COLORS.preview, depthTest: false }));
-      line.renderOrder = 10;
-      this.overlay.add(line);
-    }
+    const line = (pts: THREE.Vector3[]) => {
+      const l = new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), new THREE.LineBasicMaterial({ color: COLORS.preview, depthTest: false }));
+      l.renderOrder = 10;
+      this.overlay.add(l);
+    };
+    if (path.length >= 2) line(path);
+    if (from && to) line([from, to]);
+  }
+
+  /**
+   * Marco de coordenadas para exportar a DXF: si hay un plano DXF de fondo se exporta en sus
+   * coordenadas y unidades, para que la red quede encima del plano del arquitecto.
+   */
+  dxfExportFrame(): { toPlan: (x: number, y: number) => { x: number; y: number }; ftPerUnit: number } | undefined {
+    const u = this.underlayMeta;
+    if (!u || u.kind !== 'dxf' || !this.underlayAsset) return undefined;
+    return { toPlan: (x, y) => this.worldToPlan(x, y), ftPerUnit: u.scale };
   }
 
   setView(view: ViewName) {
