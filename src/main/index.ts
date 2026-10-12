@@ -129,7 +129,7 @@ function buildMenu() {
         item('Acerca de RociaCAD', 'about'),
         {
           label: 'Página del proyecto',
-          click: () => shell.openExternal('https://github.com/'),
+          click: () => shell.openExternal('https://github.com/jedwardmv-svg/rociacad'),
         },
       ],
     },
