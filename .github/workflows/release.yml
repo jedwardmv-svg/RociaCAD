@@ -1,17 +1,50 @@
-# Crea los instaladores de Windows, Mac y Linux y los publica como una versión (release)
-# Se activa al subir una etiqueta que empiece por "v", por ejemplo v0.1.0
+# Crea los instaladores de Windows, Mac y Linux y los publica como una versión (Release).
+#
+# Se ejecuta en cada cambio a "main". Si la versión de package.json todavía no tiene
+# una Release publicada, la crea: borrador → instaladores de las 3 plataformas → publicar.
+# Para sacar una versión nueva basta con subir el número de "version" en package.json.
 name: Instaladores
 
 on:
   push:
-    tags: ['v*']
+    branches: [main]
   workflow_dispatch:
 
 permissions:
   contents: write
 
+concurrency:
+  group: release
+  cancel-in-progress: false
+
 jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+      release: ${{ steps.check.outputs.release }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: v
+        run: echo "version=$(node -p "require('./package.json').version")" >> "$GITHUB_OUTPUT"
+      - id: check
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: v${{ steps.v.outputs.version }}
+        run: |
+          if gh release view "$TAG" --json isDraft -q .isDraft 2>/dev/null | grep -q false; then
+            echo "La versión $TAG ya está publicada; no se hace nada."
+            echo "release=false" >> "$GITHUB_OUTPUT"
+          else
+            gh release view "$TAG" >/dev/null 2>&1 || \
+              gh release create "$TAG" --draft --target "$GITHUB_SHA" --title "RociaCAD $TAG" \
+                --notes "Instaladores de RociaCAD $TAG. Vea el README para instalar en Windows, Mac o Linux."
+            echo "release=true" >> "$GITHUB_OUTPUT"
+          fi
+
   build:
+    needs: prepare
+    if: needs.prepare.outputs.release == 'true'
     strategy:
       fail-fast: false
       matrix:
@@ -32,7 +65,17 @@ jobs:
       - run: npm ci
       - run: npm test
       - run: npm run build
-      - name: Crear instalador y publicarlo
+      - name: Crear instalador y subirlo al borrador
         run: npx electron-builder ${{ matrix.target }} --publish always
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  publish:
+    needs: [prepare, build]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Publicar la versión
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: gh release edit "v${{ needs.prepare.outputs.version }}" --draft=false --latest

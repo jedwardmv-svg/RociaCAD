@@ -45,7 +45,7 @@ npm test           # corre las pruebas del motor hidráulico
 npm run dist:win   # crea el instalador de Windows (o dist:mac / dist:linux)
 ```
 
-Para publicar una versión nueva: cambie `version` en `package.json`, cree la etiqueta (`git tag v0.2.0`) y súbala (`git push --tags`). GitHub Actions crea los instaladores de las tres plataformas y los publica en Releases.
+Para publicar una versión nueva basta con subir el número de `version` en `package.json` y enviar el cambio a `main`. GitHub Actions crea los instaladores de las tres plataformas y los publica en Releases.
 
 Estructura:
 

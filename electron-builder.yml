@@ -15,7 +15,7 @@ fileAssociations:
     role: Editor
 publish:
   provider: github
-  releaseType: release
+  releaseType: draft
 
 # ---------- Windows ----------
 win:
