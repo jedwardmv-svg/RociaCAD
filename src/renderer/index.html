@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:"
+    />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>RociaCAD</title>
+  </head>
+  <body>
+    <div id="app">
+      <header id="toolbar"></header>
+      <aside id="left"></aside>
+      <main id="stage">
+        <div id="viewport"></div>
+        <div id="tool-options"></div>
+        <div id="view-switch"></div>
+        <div id="legend"></div>
+        <div id="hint"></div>
+      </main>
+      <aside id="inspector"></aside>
+      <section id="bottom"></section>
+      <footer id="status"></footer>
+    </div>
+    <div id="print-root"></div>
+    <script type="module" src="./src/main.ts"></script>
+  </body>
+</html>

@@ -1,0 +1,54 @@
+# Configuración de los instaladores (https://www.electron.build)
+appId: co.rociacad.app
+productName: RociaCAD
+copyright: Copyright © 2026 Jhon Edward Marquez Valencia
+directories:
+  output: dist
+  buildResources: build
+files:
+  - out/**
+  - package.json
+fileAssociations:
+  - ext: rcad
+    name: Proyecto RociaCAD
+    description: Proyecto de rociadores contra incendio
+    role: Editor
+publish:
+  provider: github
+  releaseType: release
+
+# ---------- Windows ----------
+win:
+  target:
+    - target: nsis
+      arch: [x64]
+  artifactName: RociaCAD-${version}-Windows-instalador.${ext}
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: RociaCAD
+  installerLanguages: [es_ES]
+  language: "3082"
+
+# ---------- macOS ----------
+# Sin certificado de Apple se firma "ad hoc" ("-"): la app funciona, pero macOS
+# pide confirmar la apertura la primera vez (ver README).
+mac:
+  target:
+    - target: dmg
+      arch: [arm64, x64]
+  category: public.app-category.productivity
+  identity: "-"
+  hardenedRuntime: false
+  artifactName: RociaCAD-${version}-Mac-${arch}.${ext}
+dmg:
+  title: RociaCAD ${version}
+
+# ---------- Linux ----------
+linux:
+  target: [AppImage]
+  category: Engineering
+  artifactName: RociaCAD-${version}-Linux.${ext}
