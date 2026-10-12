@@ -6,7 +6,7 @@
   "main": "./out/main/index.js",
   "author": "Jhon Edward Marquez Valencia",
   "license": "MIT",
-  "homepage": "https://github.com/jedwardmv-svg/rociacad",
+  "homepage": "https://github.com/jedwardmv-svg/RociaCAD",
   "scripts": {
     "dev": "electron-vite dev",
     "build": "npm run typecheck && electron-vite build",
@@ -36,9 +36,9 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/jedwardmv-svg/rociacad.git"
+    "url": "https://github.com/jedwardmv-svg/RociaCAD.git"
   },
   "bugs": {
-    "url": "https://github.com/jedwardmv-svg/rociacad/issues"
+    "url": "https://github.com/jedwardmv-svg/RociaCAD/issues"
   }
 }
