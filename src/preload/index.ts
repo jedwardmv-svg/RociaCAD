@@ -9,6 +9,8 @@ const api = {
     ipcRenderer.invoke('file:open', kind),
   saveFile: (args: { path?: string; content: string; suggestedName?: string; kind?: 'project' | 'catalog' | 'dxf' }): Promise<{ path: string; name: string } | null> =>
     ipcRenderer.invoke('file:save', args),
+  /** Lee un DWG en la ventana aislada; devuelve el plano en líneas */
+  parseDwg: (bytes: Uint8Array): Promise<unknown> => ipcRenderer.invoke('dwg:parse', bytes),
   exportPdf: (args: { suggestedName: string }): Promise<{ path: string } | null> => ipcRenderer.invoke('pdf:export', args),
   confirm: (args: { message: string; detail?: string; buttons: string[] }): Promise<number> => ipcRenderer.invoke('app:confirm', args),
   appInfo: (): Promise<{ version: string; platform: string }> => ipcRenderer.invoke('app:info'),

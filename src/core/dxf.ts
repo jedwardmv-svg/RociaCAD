@@ -59,8 +59,9 @@ function apply(m: Mat, p: Pt): Pt {
 
 const SEGS_PER_CIRCLE = 64;
 
-// Tipos mínimos de lo que entrega dxf-parser (se leen de forma defensiva)
-interface AnyEntity {
+// Tipos mínimos de lo que entrega dxf-parser (se leen de forma defensiva).
+// Los DWG se convierten a esta misma forma (ver dwg.ts).
+export interface AnyEntity {
   type: string;
   layer?: string;
   inPaperSpace?: boolean;
@@ -68,14 +69,20 @@ interface AnyEntity {
   [k: string]: unknown;
 }
 
+export type PlanBlocks = Record<string, { entities?: AnyEntity[]; position?: Pt }>;
+
 export function parseDxf(text: string): DxfResult {
   const parser = new DxfParser();
   const dxf = parser.parseSync(text);
   if (!dxf) throw new Error('El archivo DXF está vacío o no se pudo leer.');
   const header = (dxf.header ?? {}) as Record<string, unknown>;
   const insUnits = Number(header['$INSUNITS'] ?? 0) || 0;
-  const blocks = (dxf.blocks ?? {}) as unknown as Record<string, { entities?: AnyEntity[]; position?: Pt }>;
+  const blocks = (dxf.blocks ?? {}) as unknown as PlanBlocks;
+  return buildPlan((dxf.entities ?? []) as unknown as AnyEntity[], blocks, insUnits, 'DXF');
+}
 
+/** Convierte entidades (con la forma de dxf-parser) en segmentos por capa. */
+export function buildPlan(entities: AnyEntity[], blocks: PlanBlocks, insUnits: number, format = 'DXF'): DxfResult {
   const layers = new Map<string, number[]>();
   const snap: number[] = [];
   const stats = { entities: 0, segments: 0, texts: 0, skipped: {} as Record<string, number> };
@@ -282,12 +289,12 @@ export function parseDxf(text: string): DxfResult {
     }
   };
 
-  for (const e of (dxf.entities ?? []) as unknown as AnyEntity[]) drawEntity(e, I, '', 0);
+  for (const e of entities) drawEntity(e, I, '', 0);
 
   const out: DxfLayer[] = [...layers.entries()]
     .map(([name, segments]) => ({ name, segments }))
     .sort((a, b) => a.name.localeCompare(b.name, 'es', { numeric: true }));
-  if (!out.length) throw new Error('El DXF no tiene líneas en el espacio modelo que se puedan mostrar.');
+  if (!out.length) throw new Error(`El ${format} no tiene líneas en el espacio modelo que se puedan mostrar.`);
 
   return {
     layers: out,

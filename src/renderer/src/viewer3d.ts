@@ -9,6 +9,7 @@ import {
   fmt,
   getElementType,
   getMaterial,
+  isVectorPlan,
   NOMINAL_SIZES,
   sizeLabel,
   type CalcResult,
@@ -684,7 +685,7 @@ export class Viewer {
    */
   dxfExportFrame(): { toPlan: (x: number, y: number) => { x: number; y: number }; ftPerUnit: number } | undefined {
     const u = this.underlayMeta;
-    if (!u || u.kind !== 'dxf' || !this.underlayAsset) return undefined;
+    if (!u || !isVectorPlan(u.kind) || !this.underlayAsset) return undefined;
     return { toPlan: (x, y) => this.worldToPlan(x, y), ftPerUnit: u.scale };
   }
 

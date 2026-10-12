@@ -1,7 +1,7 @@
 /**
  * Sección "Plano de fondo" del panel izquierdo.
  */
-import { INSUNITS_FT, type Underlay } from '../../core';
+import { INSUNITS_FT, isVectorPlan, type Underlay } from '../../core';
 import { h } from './dom';
 import { numField } from './fields';
 import { store } from './state';
@@ -18,7 +18,7 @@ export const planHooks = {
 
 let layersOpen = false;
 
-const KIND_NAMES: Record<Underlay['kind'], string> = { dxf: 'Dibujo DXF', pdf: 'PDF', image: 'Imagen' };
+const KIND_NAMES: Record<Underlay['kind'], string> = { dxf: 'Dibujo DXF', dwg: 'Dibujo DWG', pdf: 'PDF', image: 'Imagen' };
 
 function setU(fn: (u: Underlay) => void, key?: string) {
   store.mutate((p) => {
@@ -42,7 +42,7 @@ export function planSection(): HTMLElement {
 
   // --- Escala según el tipo
   let scaleField: HTMLElement;
-  if (u.kind === 'dxf') {
+  if (isVectorPlan(u.kind)) {
     const opts = [6, 5, 4, 2, 1].map((code) => ({ code, ...INSUNITS_FT[code] }));
     const match = opts.find((o) => Math.abs(o.ft - u.scale) / o.ft < 1e-6);
     const sel = h(
@@ -119,7 +119,7 @@ export function planSection(): HTMLElement {
   }
 
   let layers: HTMLElement | null = null;
-  if (u.kind === 'dxf' && asset?.dxf) {
+  if (isVectorPlan(u.kind) && asset?.dxf) {
     const hidden = new Set(u.hiddenLayers ?? []);
     const all = asset.dxf.layers;
     const shown = all.filter((l) => !hidden.has(l.name)).length;
@@ -156,7 +156,7 @@ export function planSection(): HTMLElement {
   }
 
   const dxfNote =
-    u.kind === 'dxf' && asset?.dxf && asset.dxf.stats.texts > 0
+    isVectorPlan(u.kind) && asset?.dxf && asset.dxf.stats.texts > 0
       ? h('p', { class: 'muted-text' }, `${asset.dxf.stats.texts} textos del dibujo no se muestran.`)
       : null;
 
@@ -182,7 +182,7 @@ export function planSection(): HTMLElement {
     numField({ label: 'Elevación', q: 'elevation', value: u.z, key: 'plan-z', onCommit: (v) => setU((x) => (x.z = v)) }),
     h('div', { class: 'field' }, h('span', null, 'Opacidad'), opacity),
     h('label', { class: 'check' }, visible, 'Mostrar el plano'),
-    u.kind !== 'dxf' ? h('label', { class: 'check' }, invert, 'Invertir colores (fondo oscuro)') : null,
+    !isVectorPlan(u.kind) ? h('label', { class: 'check' }, invert, 'Invertir colores (fondo oscuro)') : null,
     layers,
     dxfNote,
     h(

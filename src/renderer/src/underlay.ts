@@ -3,7 +3,7 @@
  */
 import * as pdfjs from 'pdfjs-dist';
 import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
-import { parseDxf, type AttachedData, type DxfResult, type Underlay } from '../../core';
+import { isVectorPlan, parseDxf, planFromDwgDatabase, type AttachedData, type DwgDatabaseLike, type DxfResult, type Underlay } from '../../core';
 
 pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
 
@@ -43,7 +43,7 @@ export function fromBase64(b64: string): Uint8Array {
 const cache = new Map<string, Promise<UnderlayAsset>>();
 
 function assetKey(u: Underlay) {
-  return `${u.dataId}|${u.kind === 'pdf' ? u.page ?? 1 : ''}|${u.kind !== 'dxf' && u.invert ? 'inv' : ''}`;
+  return `${u.dataId}|${u.kind === 'pdf' ? u.page ?? 1 : ''}|${!isVectorPlan(u.kind) && u.invert ? 'inv' : ''}`;
 }
 
 export function loadAsset(u: Underlay, data: AttachedData): Promise<UnderlayAsset> {
@@ -59,9 +59,8 @@ export function loadAsset(u: Underlay, data: AttachedData): Promise<UnderlayAsse
 
 async function readAsset(u: Underlay, data: AttachedData): Promise<UnderlayAsset> {
   const bytes = fromBase64(data.base64);
-  if (u.kind === 'dxf') {
-    const text = new TextDecoder('utf-8').decode(bytes);
-    const dxf = parseDxf(text);
+  if (u.kind === 'dxf' || u.kind === 'dwg') {
+    const dxf = u.kind === 'dxf' ? parseDxf(decodeDxf(bytes)) : await readDwg(bytes);
     const b = dxf.bounds;
     return { kind: 'dxf', dxf, width: b.maxX - b.minX, height: b.maxY - b.minY };
   }
@@ -69,6 +68,47 @@ async function readAsset(u: Underlay, data: AttachedData): Promise<UnderlayAsset
   const bitmap = await createImageBitmap(new Blob([bytes as BlobPart], { type: data.mime }));
   const canvas = toCanvas(bitmap.width, bitmap.height, (ctx) => ctx.drawImage(bitmap, 0, 0), !!u.invert);
   return { kind: 'image', canvas, width: bitmap.width, height: bitmap.height };
+}
+
+/** Los DXF viejos vienen en ANSI (Windows-1252); los nuevos en UTF-8 */
+function decodeDxf(bytes: Uint8Array): string {
+  try {
+    return new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+  } catch {
+    return new TextDecoder('windows-1252').decode(bytes);
+  }
+}
+
+// ---------- DWG (LibreDWG en WebAssembly; se carga solo cuando hace falta) ----------
+type LibreDwgModule = typeof import('@mlightcad/libredwg-web');
+let dwgLib: Promise<{ mod: LibreDwgModule; lib: Awaited<ReturnType<LibreDwgModule['LibreDwg']['create']>> }> | null = null;
+
+function loadDwgLib() {
+  if (!dwgLib) {
+    dwgLib = (async () => {
+      const mod = await import('@mlightcad/libredwg-web');
+      // Vite empaqueta el .wasm junto al código y la librería lo encuentra sola
+      const lib = await mod.LibreDwg.create();
+      return { mod, lib };
+    })();
+    dwgLib.catch(() => (dwgLib = null));
+  }
+  return dwgLib;
+}
+
+async function readDwg(bytes: Uint8Array): Promise<DxfResult> {
+  // En la app de escritorio el DWG se lee en una ventana aislada (LibreDWG necesita eval)
+  if (window.rocia?.parseDwg) return (await window.rocia.parseDwg(bytes)) as DxfResult;
+  const { mod, lib } = await loadDwgLib();
+  const buf = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
+  const dwg = lib.dwg_read_data(buf, mod.Dwg_File_Type.DWG);
+  if (!dwg) throw new Error('El archivo DWG está dañado o es de una versión que no se pudo leer.');
+  try {
+    const db = lib.convert(dwg) as unknown as DwgDatabaseLike;
+    return planFromDwgDatabase(db);
+  } finally {
+    lib.dwg_free(dwg);
+  }
 }
 
 /** Tamaño máximo de textura que aceptamos (la mayoría de tarjetas aceptan 8192 o más) */
@@ -138,12 +178,9 @@ export function pickPlanFile(): Promise<File | null> {
 /** Lee un archivo elegido por el usuario y propone escala y posición iniciales. */
 export async function createUnderlay(file: File): Promise<NewUnderlay> {
   const ext = file.name.split('.').pop()?.toLowerCase() ?? '';
-  if (ext === 'dwg') {
-    throw new Error('Los archivos DWG no se pueden leer directamente. Guárdelo como DXF desde su programa de CAD (o con el conversor gratuito ODA File Converter) y cárguelo de nuevo.');
-  }
-  const kind: Underlay['kind'] = ext === 'dxf' ? 'dxf' : ext === 'pdf' ? 'pdf' : 'image';
+  const kind: Underlay['kind'] = ext === 'dxf' ? 'dxf' : ext === 'dwg' ? 'dwg' : ext === 'pdf' ? 'pdf' : 'image';
   const bytes = new Uint8Array(await file.arrayBuffer());
-  const mime = kind === 'dxf' ? 'image/vnd.dxf' : kind === 'pdf' ? 'application/pdf' : file.type || 'image/png';
+  const mime = kind === 'dxf' ? 'image/vnd.dxf' : kind === 'dwg' ? 'image/vnd.dwg' : kind === 'pdf' ? 'application/pdf' : file.type || 'image/png';
   const data: AttachedData = { mime, base64: toBase64(bytes) };
   const meta: Underlay = {
     kind,
@@ -155,14 +192,14 @@ export async function createUnderlay(file: File): Promise<NewUnderlay> {
     y: 0,
     rotation: 0,
     z: 0,
-    opacity: kind === 'dxf' ? 0.9 : 0.75,
+    opacity: isVectorPlan(kind) ? 0.9 : 0.75,
     visible: true,
-    invert: kind !== 'dxf' ? true : undefined,
+    invert: !isVectorPlan(kind) ? true : undefined,
     calibrated: false,
   };
   const asset = await loadAsset(meta, data);
 
-  if (kind === 'dxf') {
+  if (isVectorPlan(kind)) {
     const d = asset.dxf!;
     if (d.ftPerUnit) {
       meta.scale = d.ftPerUnit;

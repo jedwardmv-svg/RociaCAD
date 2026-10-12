@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <!--
+      Ventana oculta y aislada que solo lee planos DWG con LibreDWG (WebAssembly).
+      LibreDWG necesita 'unsafe-eval'; por eso corre aquí y no en la ventana principal.
+      No tiene acceso a nada del sistema: solo recibe los bytes del archivo y devuelve líneas.
+    -->
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'self' 'unsafe-eval' 'wasm-unsafe-eval'; connect-src 'self' data: blob:"
+    />
+    <title>Lector DWG</title>
+  </head>
+  <body>
+    <script type="module" src="./src/dwgWorker.ts"></script>
+  </body>
+</html>

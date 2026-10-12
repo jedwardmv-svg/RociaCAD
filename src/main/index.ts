@@ -4,6 +4,7 @@
 import { app, BrowserWindow, dialog, ipcMain, Menu, shell, type MenuItemConstructorOptions } from 'electron';
 import { readFile, writeFile } from 'node:fs/promises';
 import { basename, join } from 'node:path';
+import './dwg';
 import { checkForUpdates, initUpdater, installIfRequested, loadSettings, saveSettings } from './updater';
 
 type FileKind = 'project' | 'catalog' | 'dxf';
@@ -72,7 +73,8 @@ function createWindow() {
   if (process.env.ELECTRON_RENDERER_URL) {
     win.loadURL(process.env.ELECTRON_RENDERER_URL);
   } else {
-    win.loadFile(join(__dirname, '../renderer/index.html'));
+    // ROCIA_DEBUG=1 deja disponibles los ganchos para pruebas automáticas
+    win.loadFile(join(__dirname, '../renderer/index.html'), process.env.ROCIA_DEBUG ? { hash: 'debug' } : undefined);
   }
 }
 

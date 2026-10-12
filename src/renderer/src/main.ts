@@ -19,6 +19,7 @@ import {
   applySprinklerModel,
   deleteElement,
   ELEMENT_KIND_SHAPE,
+  isVectorPlan,
   PIPE_ROLE_NAMES,
   pruneProjectCatalog,
   putInProjectCatalog,
@@ -337,8 +338,8 @@ function renderHint() {
     sprinkler: 'Clic en un nodo o sobre un tubo para colocar un rociador.',
     element: elementHint(),
     calibrate:
-      store.project.underlay?.kind === 'dxf'
-        ? 'El cursor se ajusta a los extremos de las líneas del DXF. Esc cancela.'
+      store.project.underlay && isVectorPlan(store.project.underlay.kind)
+        ? 'El cursor se ajusta a los extremos de las líneas del plano. Esc cancela.'
         : 'Acerque la vista y haga clic con precisión en los dos puntos. Esc cancela.',
     'move-plan': 'El destino se ajusta a los nodos del sistema. Esc cancela.',
   };
@@ -638,7 +639,7 @@ let measure: { a: THREE.Vector3 | null; b: THREE.Vector3 | null } = { a: null, b
 let currentAsset: UnderlayAsset | undefined;
 let currentAssetKey = '';
 
-const underlayKey = (u: NonNullable<Project['underlay']>) => `${u.dataId}|${u.kind === 'pdf' ? u.page ?? 1 : ''}|${u.kind !== 'dxf' && u.invert ? 1 : 0}`;
+const underlayKey = (u: NonNullable<Project['underlay']>) => `${u.dataId}|${u.kind === 'pdf' ? u.page ?? 1 : ''}|${!isVectorPlan(u.kind) && u.invert ? 1 : 0}`;
 
 /** Pone en la vista el plano del proyecto, leyéndolo si hace falta. */
 function syncUnderlay() {
@@ -969,7 +970,7 @@ desktop?.onMenu(async (action) => {
     case 'view-fit':
       return viewer.fit();
     case 'about':
-      return flash(`RociaCAD ${appVersion}. Software libre bajo licencia MIT.`);
+      return flash(`RociaCAD ${appVersion}. Software libre bajo la licencia GNU GPL v3.`);
   }
 });
 

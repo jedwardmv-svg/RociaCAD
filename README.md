@@ -9,7 +9,7 @@ Programa libre para diseñar y calcular sistemas de rociadores automáticos cont
 - **Cálculo hidráulico de demanda** (densidad/área de NFPA 13): Hazen-Williams, factor K, elevación (0,433 psi/ft), longitudes equivalentes de accesorios con los ajustes por coeficiente C y por diámetro interno, asignación de mangueras y comparación contra la curva del suministro (prueba de hidrante).
 - **Sistemas en árbol, en lazo y en malla (grid)**: la red se resuelve completa con el método nodal de Newton-Raphson, sin suponer el sentido del flujo.
 - **Vista 3D y planta**: dibujo de tubería con ajuste a 45° y a la cuadrícula, colocación de rociadores, colores por material, diámetro, presión o velocidad.
-- **Plano de fondo**: cargue el plano arquitectónico en DXF, PDF o imagen (botón, menú Archivo o arrastrando el archivo) y dibuje la tubería encima. En DXF se leen las unidades, se pueden ocultar capas y el cursor se ajusta a extremos, vértices y centros del dibujo. Para PDF e imágenes se indica la escala (1:100, 1:50…) o se calibra marcando dos puntos de medida conocida. El plano se guarda dentro del archivo del proyecto. Los DWG deben guardarse primero como DXF.
+- **Plano de fondo**: cargue el plano arquitectónico en DWG, DXF, PDF o imagen (botón, menú Archivo o arrastrando el archivo) y dibuje la tubería encima. En DWG y DXF se leen las unidades, se pueden ocultar capas y el cursor se ajusta a extremos, vértices y centros del dibujo. Para PDF e imágenes se indica la escala (1:100, 1:50…) o se calibra marcando dos puntos de medida conocida. El plano se guarda dentro del archivo del proyecto. Los DWG se leen con LibreDWG (de AutoCAD R14 a las versiones actuales); los textos del plano todavía no se muestran.
 - **Área de diseño**: selección manual o sugerida (los rociadores hidráulicamente más remotos).
 - **Lista de materiales**: tubos comerciales por material y diámetro, codos, tees, cruces, reducciones y tapones detectados en el dibujo, válvulas y rociadores, con precios y total.
 - **Memoria de cálculo en PDF**: resumen, gráfica de suministro contra demanda en papel N^1,85, tabla por tramos, rociadores, avisos y materiales.
@@ -64,4 +64,17 @@ tests/          pruebas automáticas (Vitest)
 
 ## Licencia
 
-MIT. Vea [LICENSE](LICENSE).
+Copyright © 2026 Jhon Edward Marquez Valencia.
+
+RociaCAD es software libre: puede redistribuirlo y modificarlo bajo los términos de la **Licencia Pública General de GNU (GPL) versión 3**, o (a su elección) cualquier versión posterior, publicada por la Free Software Foundation. Se distribuye con la esperanza de que sea útil, pero **sin ninguna garantía**. Vea el texto completo en [LICENSE](LICENSE).
+
+El código fuente de cada versión publicada está en este repositorio.
+
+### Componentes de terceros
+
+- [LibreDWG](https://www.gnu.org/software/libredwg/) (GPL-3.0), a través de [libredwg-web](https://github.com/mlightcad/libredwg-web): lectura de archivos DWG. Los dibujos de ejemplo en `tests/fixtures` vienen de su conjunto de pruebas.
+- [Three.js](https://threejs.org) (MIT): vista 3D.
+- [pdf.js](https://mozilla.github.io/pdf.js/) (Apache-2.0): planos en PDF.
+- [dxf-parser](https://github.com/gdsestimating/dxf-parser) (MIT) y [@tarikjabiri/dxf](https://github.com/dxfjs/writer) (MIT): lectura y escritura de DXF.
+- [Electron](https://www.electronjs.org) (MIT) y electron-updater (MIT).
+- Tipografía [Barlow](https://github.com/jpt/barlow) (OFL-1.1).

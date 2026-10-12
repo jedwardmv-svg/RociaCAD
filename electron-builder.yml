@@ -1,13 +1,17 @@
 # Configuración de los instaladores (https://www.electron.build)
 appId: co.rociacad.app
 productName: RociaCAD
-copyright: Copyright © 2026 Jhon Edward Marquez Valencia
+copyright: Copyright © 2026 Jhon Edward Marquez Valencia — Licencia GNU GPL v3
 directories:
   output: dist
   buildResources: build
 files:
   - out/**
   - package.json
+# la GPL pide entregar el texto de la licencia junto con el programa
+extraResources:
+  - from: LICENSE
+    to: LICENCIA-GPL-3.txt
 fileAssociations:
   - ext: rcad
     name: Proyecto RociaCAD

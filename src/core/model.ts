@@ -132,7 +132,7 @@ export interface WaterSupply {
  * deshacer/rehacer no copie megas de datos en cada cambio.
  */
 export interface Underlay {
-  kind: 'dxf' | 'pdf' | 'image';
+  kind: 'dxf' | 'dwg' | 'pdf' | 'image';
   /** nombre del archivo original */
   name: string;
   /** clave de los datos del archivo en `underlayData` */
@@ -158,6 +158,9 @@ export interface Underlay {
   /** true cuando el usuario ya confirmó o calibró la escala */
   calibrated: boolean;
 }
+
+/** DXF y DWG son dibujos de líneas (capas, ajuste del cursor); PDF e imagen son fotos */
+export const isVectorPlan = (kind: Underlay['kind']) => kind === 'dxf' || kind === 'dwg';
 
 export interface ProjectInfo {
   name: string;
