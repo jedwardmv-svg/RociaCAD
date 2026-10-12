@@ -1,7 +1,7 @@
 /**
  * Estado de la aplicación: proyecto, selección, resultados, deshacer/rehacer.
  */
-import { buildBom, calculate, type Bom, type CalcResult, type Project } from '../../core';
+import { buildBom, calculate, type AttachedData, type Bom, type CalcResult, type Project } from '../../core';
 
 export type Selection =
   | { kind: 'node'; id: string }
@@ -9,7 +9,7 @@ export type Selection =
   | { kind: 'sprinkler'; id: string }
   | null;
 
-export type Tool = 'select' | 'draw' | 'sprinkler';
+export type Tool = 'select' | 'draw' | 'sprinkler' | 'calibrate' | 'move-plan';
 
 export type ColorMode = 'material' | 'size' | 'pressure' | 'velocity';
 
@@ -29,6 +29,8 @@ class Store {
   filePath: string | null = null;
   fileName: string | null = null;
   dirty = false;
+  /** archivos adjuntos (plano de fondo); fuera del proyecto para no copiarlos al deshacer */
+  attached = new Map<string, AttachedData>();
   /** preferencias de dibujo */
   drawDefaults = {
     size: '1-1/4' as Project['pipes'][number]['size'],
@@ -43,8 +45,9 @@ class Store {
   private listeners = new Set<Listener>();
   private calcTimer: number | undefined;
 
-  load(project: Project, file?: { path: string | null; name: string | null }) {
+  load(project: Project, file?: { path: string | null; name: string | null }, attached?: Record<string, AttachedData>) {
     this.project = project;
+    this.attached = new Map(Object.entries(attached ?? {}));
     this.selection = null;
     this.undoStack = [];
     this.redoStack = [];

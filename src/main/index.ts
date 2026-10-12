@@ -87,6 +87,7 @@ function buildMenu() {
         item('Guardar', 'save', 'CmdOrCtrl+S'),
         item('Guardar como…', 'save-as', 'CmdOrCtrl+Shift+S'),
         { type: 'separator' },
+        item('Cargar plano de fondo (DXF, PDF o imagen)…', 'load-plan', 'CmdOrCtrl+L'),
         item('Exportar reporte PDF…', 'export-pdf', 'CmdOrCtrl+P'),
         { type: 'separator' },
         {

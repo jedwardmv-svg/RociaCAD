@@ -105,6 +105,39 @@ export interface WaterSupply {
   residualFlow: number;
 }
 
+/**
+ * Plano de fondo (DXF, PDF o imagen) sobre el que se dibuja.
+ * Los bytes del archivo no van aquí: se guardan aparte (ver `ProjectFile.underlayData`) para que
+ * deshacer/rehacer no copie megas de datos en cada cambio.
+ */
+export interface Underlay {
+  kind: 'dxf' | 'pdf' | 'image';
+  /** nombre del archivo original */
+  name: string;
+  /** clave de los datos del archivo en `underlayData` */
+  dataId: string;
+  /** página del PDF (desde 1) */
+  page?: number;
+  /** pies por unidad del plano (unidad del DXF, punto del PDF o píxel de la imagen) */
+  scale: number;
+  /** posición (ft) donde queda el origen del plano */
+  x: number;
+  y: number;
+  /** giro en grados (antihorario) */
+  rotation: number;
+  /** elevación (ft) del plano */
+  z: number;
+  /** 0 a 1 */
+  opacity: number;
+  visible: boolean;
+  /** PDF/imagen: invertir colores para verlo sobre fondo oscuro */
+  invert?: boolean;
+  /** DXF: capas ocultas */
+  hiddenLayers?: string[];
+  /** true cuando el usuario ya confirmó o calibró la escala */
+  calibrated: boolean;
+}
+
 export interface ProjectInfo {
   name: string;
   client?: string;
@@ -129,6 +162,19 @@ export interface Project {
   currency?: string;
   /** Longitud de los tubos comerciales por material (ft), si difiere del catálogo */
   stickLengths?: Partial<Record<MaterialId, number>>;
+  /** Plano de fondo */
+  underlay?: Underlay;
+}
+
+/** Datos binarios de archivos adjuntos (plano de fondo), en base64. */
+export interface AttachedData {
+  mime: string;
+  base64: string;
+}
+
+/** Lo que se escribe en el archivo .rcad: el proyecto más los archivos adjuntos. */
+export interface ProjectFile extends Project {
+  underlayData?: Record<string, AttachedData>;
 }
 
 /** Errores de estructura que impiden calcular. */

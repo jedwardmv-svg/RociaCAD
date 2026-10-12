@@ -1,3 +1,4 @@
+/// <reference types="vite/client" />
 import type { RociaApi } from '../../preload';
 
 declare global {

@@ -6,6 +6,8 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { CSS2DObject, CSS2DRenderer } from 'three/examples/jsm/renderers/CSS2DRenderer.js';
 import { fmt, MATERIALS, NOMINAL_SIZES, sizeLabel, type CalcResult, type NominalSize, type Project } from '../../core';
 import type { ColorMode, Selection } from './state';
+import type { Underlay } from '../../core';
+import type { UnderlayAsset } from './underlay';
 
 export type ViewName = '3d' | 'top' | 'front' | 'side';
 
@@ -81,6 +83,14 @@ export class Viewer {
   private unitCylinder = new THREE.CylinderGeometry(1, 1, 1, 18, 1, false);
   private sphere = new THREE.SphereGeometry(1, 16, 12);
   private bounds = new THREE.Box3();
+  private modelBounds = new THREE.Box3();
+  private underlayGroup = new THREE.Group();
+  private underlayKey = '';
+  private underlayMeta: Underlay | undefined;
+  private underlayAsset: UnderlayAsset | undefined;
+  private underlayMaterials: (THREE.LineBasicMaterial | THREE.MeshBasicMaterial)[] = [];
+  private assetIds = new WeakMap<UnderlayAsset, number>();
+  private nextAssetId = 1;
   view: ViewName = '3d';
   floorZ = 0;
   legend: LegendEntry[] = [];
@@ -118,7 +128,7 @@ export class Viewer {
     const sun = new THREE.DirectionalLight(0xffffff, 1.6);
     sun.position.set(40, -60, 120);
     this.scene.add(sun);
-    this.scene.add(this.grid, this.model, this.overlay);
+    this.scene.add(this.underlayGroup, this.grid, this.model, this.overlay);
 
     new ResizeObserver(() => this.resize()).observe(el);
     this.resize();
@@ -182,7 +192,8 @@ export class Viewer {
     const box = new THREE.Box3();
     for (const n of project.nodes) box.expandByPoint(new THREE.Vector3(n.x, n.y, n.z));
     if (box.isEmpty()) box.set(new THREE.Vector3(-10, -10, 0), new THREE.Vector3(10, 10, 10));
-    this.bounds = box;
+    this.modelBounds = box;
+    this.bounds = this.combinedBounds();
 
     // --- Escala de colores
     let pMin = Infinity;
@@ -339,7 +350,7 @@ export class Viewer {
 
   private rebuildGrid(metric: boolean) {
     this.grid.clear();
-    const b = this.bounds;
+    const b = this.modelBounds;
     const step = metric ? 1 / 0.3048 : 1; // 1 m ó 1 ft
     const major = metric ? 5 : 10; // líneas fuertes cada 5 m ó 10 ft
     const pad = step * major;
@@ -361,6 +372,169 @@ export class Viewer {
       return new THREE.LineSegments(geo, new THREE.LineBasicMaterial({ color }));
     };
     this.grid.add(mk(minor, COLORS.gridMinor), mk(majorPts, COLORS.gridMajor));
+  }
+
+  // ---------- Plano de fondo ----------
+
+  /** Muestra (o quita) el plano de fondo. Solo reconstruye la geometría si cambió el archivo o las capas. */
+  setUnderlay(meta: Underlay | undefined, asset: UnderlayAsset | undefined) {
+    this.underlayMeta = meta;
+    this.underlayAsset = asset;
+    if (!meta || !asset) {
+      this.disposeUnderlay();
+      this.underlayKey = '';
+      this.grid.visible = true;
+      this.bounds = this.combinedBounds();
+      return;
+    }
+    let id = this.assetIds.get(asset);
+    if (!id) this.assetIds.set(asset, (id = this.nextAssetId++));
+    const key = `${id}|${(meta.hiddenLayers ?? []).join('\u0001')}`;
+    if (key !== this.underlayKey) {
+      this.disposeUnderlay();
+      this.underlayKey = key;
+      if (asset.kind === 'dxf' && asset.dxf) {
+        const hidden = new Set(meta.hiddenLayers ?? []);
+        const ox = asset.dxf.bounds.minX;
+        const oy = asset.dxf.bounds.minY;
+        let n = 0;
+        for (const l of asset.dxf.layers) if (!hidden.has(l.name)) n += l.segments.length / 2;
+        const pos = new Float32Array(n * 3);
+        let k = 0;
+        for (const l of asset.dxf.layers) {
+          if (hidden.has(l.name)) continue;
+          const sg = l.segments;
+          for (let i = 0; i < sg.length; i += 2) {
+            pos[k++] = sg[i] - ox;
+            pos[k++] = sg[i + 1] - oy;
+            pos[k++] = 0;
+          }
+        }
+        const geo = new THREE.BufferGeometry();
+        geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+        const mat = new THREE.LineBasicMaterial({ color: 0xb4c2cf, transparent: true, depthWrite: false });
+        const lines = new THREE.LineSegments(geo, mat);
+        lines.position.set(ox, oy, 0);
+        lines.renderOrder = -1;
+        this.underlayMaterials.push(mat);
+        this.underlayGroup.add(lines);
+      } else if (asset.canvas) {
+        const tex = new THREE.CanvasTexture(asset.canvas);
+        tex.colorSpace = THREE.SRGBColorSpace;
+        tex.anisotropy = this.renderer.capabilities.getMaxAnisotropy();
+        const geo = new THREE.PlaneGeometry(asset.width, asset.height);
+        geo.translate(asset.width / 2, asset.height / 2, 0);
+        const mat = new THREE.MeshBasicMaterial({ map: tex, transparent: true, depthWrite: false, side: THREE.DoubleSide });
+        const mesh = new THREE.Mesh(geo, mat);
+        mesh.renderOrder = -1;
+        this.underlayMaterials.push(mat);
+        this.underlayGroup.add(mesh);
+      }
+    }
+    const g = this.underlayGroup;
+    g.position.set(meta.x, meta.y, meta.z - 0.02);
+    g.rotation.set(0, 0, THREE.MathUtils.degToRad(meta.rotation));
+    g.scale.set(meta.scale, meta.scale, 1);
+    g.visible = meta.visible;
+    for (const m of this.underlayMaterials) m.opacity = meta.opacity;
+    this.grid.visible = !meta.visible;
+    this.bounds = this.combinedBounds();
+  }
+
+  private disposeUnderlay() {
+    this.underlayGroup.traverse((o) => {
+      if (o instanceof THREE.Mesh || o instanceof THREE.LineSegments) {
+        o.geometry.dispose();
+        const m = o.material as THREE.Material & { map?: THREE.Texture };
+        m.map?.dispose();
+        m.dispose();
+      }
+    });
+    this.underlayGroup.clear();
+    this.underlayMaterials = [];
+  }
+
+  /** Caja del plano de fondo en coordenadas del proyecto (ft) */
+  private underlayBox(): THREE.Box3 | null {
+    const u = this.underlayMeta;
+    const a = this.underlayAsset;
+    if (!u || !a || !u.visible) return null;
+    const x0 = a.kind === 'dxf' ? a.dxf!.bounds.minX : 0;
+    const y0 = a.kind === 'dxf' ? a.dxf!.bounds.minY : 0;
+    const box = new THREE.Box3();
+    for (const [px, py] of [[x0, y0], [x0 + a.width, y0], [x0, y0 + a.height], [x0 + a.width, y0 + a.height]]) {
+      box.expandByPoint(this.planToWorld(px, py));
+    }
+    return box;
+  }
+
+  private combinedBounds(): THREE.Box3 {
+    const b = this.modelBounds.clone();
+    const u = this.underlayBox();
+    if (u) {
+      // proyecto vacío: el plano manda
+      if (this.modelBounds.getSize(new THREE.Vector3()).length() < 1e-6 || b.isEmpty()) return u.expandByPoint(b.min);
+      b.union(u);
+    }
+    return b;
+  }
+
+  /** Punto del plano (unidades del dibujo) a coordenadas del proyecto */
+  planToWorld(px: number, py: number): THREE.Vector3 {
+    const u = this.underlayMeta!;
+    const r = THREE.MathUtils.degToRad(u.rotation);
+    const sx = px * u.scale;
+    const sy = py * u.scale;
+    return new THREE.Vector3(u.x + sx * Math.cos(r) - sy * Math.sin(r), u.y + sx * Math.sin(r) + sy * Math.cos(r), u.z);
+  }
+
+  /** Coordenadas del proyecto a unidades del plano */
+  worldToPlan(x: number, y: number): { x: number; y: number } {
+    const u = this.underlayMeta!;
+    const r = THREE.MathUtils.degToRad(u.rotation);
+    const dx = x - u.x;
+    const dy = y - u.y;
+    return { x: (dx * Math.cos(r) + dy * Math.sin(r)) / u.scale, y: (-dx * Math.sin(r) + dy * Math.cos(r)) / u.scale };
+  }
+
+  get hasUnderlay() {
+    return !!this.underlayMeta?.visible && !!this.underlayAsset;
+  }
+
+  /** Punto del puntero sobre el plano de fondo */
+  underlayPoint(ev: PointerEvent | MouseEvent): THREE.Vector3 | null {
+    if (!this.underlayMeta) return null;
+    return this.planePoint(ev, this.underlayMeta.z);
+  }
+
+  /** Extremo o vértice del DXF más cercano al puntero (a menos de `px` píxeles), en coordenadas del proyecto */
+  underlaySnap(ev: PointerEvent | MouseEvent, px = 12): THREE.Vector3 | null {
+    const u = this.underlayMeta;
+    const a = this.underlayAsset;
+    if (!u || !a || !u.visible || a.kind !== 'dxf' || !a.dxf) return null;
+    const p = this.planePoint(ev, u.z);
+    const q = this.planePoint({ clientX: ev.clientX + px, clientY: ev.clientY } as MouseEvent, u.z);
+    if (!p || !q) return null;
+    const tol = p.distanceTo(q) / u.scale;
+    const c = this.worldToPlan(p.x, p.y);
+    const pts = a.dxf.snapPoints;
+    let best = -1;
+    let bd = tol * tol;
+    for (let i = 0; i < pts.length; i += 2) {
+      const dx = pts[i] - c.x;
+      const dy = pts[i + 1] - c.y;
+      const d = dx * dx + dy * dy;
+      if (d < bd) {
+        bd = d;
+        best = i;
+      }
+    }
+    return best >= 0 ? this.planToWorld(pts[best], pts[best + 1]) : null;
+  }
+
+  /** Muestra una medida temporal (calibración o traslado) entre dos puntos */
+  setMeasure(a: THREE.Vector3 | null, b: THREE.Vector3 | null) {
+    this.setPreview(a, b, false);
   }
 
   applySelection(sel: Selection) {
@@ -470,7 +644,7 @@ export class Viewer {
         pos = new THREE.Vector3(b.max.x + 100, center.y, center.z);
         upv = new THREE.Vector3(0, 0, 1);
       }
-      const half = Math.max(span, 10) * 0.6;
+      const half = Math.max(span, 10) * 0.66;
       this.ortho.top = half;
       this.ortho.bottom = -half;
       this.ortho.left = -half * (w / h);

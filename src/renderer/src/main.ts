@@ -25,6 +25,8 @@ import {
   type NominalSize,
   type PipeRole,
   type Project,
+  type ProjectFile,
+  type AttachedData,
 } from '../../core';
 import { renderBottom } from './bottomPanel';
 import { clear, h } from './dom';
@@ -32,7 +34,9 @@ import { flash, numInput, selectInput } from './fields';
 import { renderInspector } from './inspector';
 import { renderLeft } from './leftPanel';
 import { buildReport } from './report';
+import { planHooks } from './planPanel';
 import { store, type ColorMode, type Tool } from './state';
+import { createUnderlay, loadAsset, pickPlanFile, setMaxTexture, type UnderlayAsset } from './underlay';
 import { Viewer, type ViewName } from './viewer3d';
 
 const $ = (id: string) => document.getElementById(id)!;
@@ -92,6 +96,7 @@ function createViewer(): Viewer {
 
 function rebuildViewer() {
   viewer.rebuild(store.project, store.result, store.colorMode, store.selection, store.showLabels);
+  syncUnderlay();
   renderLegend();
 }
 
@@ -210,6 +215,7 @@ function setView(v: ViewName) {
 // ---------- Herramientas de dibujo ----------
 interface DrawPoint {
   point: THREE.Vector3;
+  onPlan?: boolean;
   nodeId?: string;
   pipeId?: string;
 }
@@ -219,6 +225,7 @@ let drawElevation = 3.5 / 0.3048; // ft
 function setTool(t: Tool) {
   store.setTool(t);
   drawStart = null;
+  measure = { a: null, b: null };
   viewer.setPreview(null, null);
   $('viewport').classList.toggle('drawing', t !== 'select');
   renderToolbar();
@@ -247,6 +254,29 @@ function renderToolOptions() {
       h('span', null, 'Paso'),
       numInput({ label: 'Paso de la cuadrícula', q: 'length', value: d.gridFt, key: 'draw-grid', min: 0, onCommit: (v) => (d.gridFt = v) }),
     );
+  } else if (store.tool === 'calibrate') {
+    if (measure.a && measure.b) {
+      const measured = measure.a.distanceTo(measure.b);
+      let real = measured;
+      const input = numInput({ label: 'Distancia real', q: 'length', value: measured, key: 'cal-real', min: 1e-6, onCommit: (v) => (real = v) });
+      const apply = () => {
+        (input.querySelector('input') as HTMLInputElement).dispatchEvent(new Event('change'));
+        applyCalibration(measured, real);
+      };
+      input.addEventListener('keydown', (e) => e.key === 'Enter' && setTimeout(apply));
+      clear(
+        el,
+        h('span', null, `Medida en el plano: ${fmt('length', measured, u, true)}. Distancia real`),
+        input,
+        h('button', { class: 'btn primary small', onclick: apply }, 'Aplicar escala'),
+        h('button', { class: 'btn outline small', onclick: () => setTool('select') }, 'Cancelar'),
+      );
+      setTimeout(() => (input.querySelector('input') as HTMLInputElement)?.select());
+    } else {
+      clear(el, h('span', null, measure.a ? 'Calibrar escala: marque el segundo punto' : 'Calibrar escala: marque el primer punto de una medida conocida'), h('button', { class: 'btn outline small', onclick: () => setTool('select') }, 'Cancelar'));
+    }
+  } else if (store.tool === 'move-plan') {
+    clear(el, h('span', null, measure.a ? 'Mover plano: marque a dónde debe ir ese punto' : 'Mover plano: marque un punto del plano'), h('button', { class: 'btn outline small', onclick: () => setTool('select') }, 'Cancelar'));
   } else if (store.tool === 'sprinkler') {
     clear(el, h('span', null, 'Rociador nuevo'), h('span', null, 'K'), numInput({ label: 'Factor K', q: 'kfactor', value: d.k, key: 'draw-k', min: 0.1, onCommit: (v) => (d.k = v) }));
   } else {
@@ -261,6 +291,11 @@ function renderHint() {
       ? 'Clic para el siguiente punto. Alt desactiva el ajuste a 45°. Esc o clic derecho termina.'
       : 'Clic en un nodo, un tubo o un punto vacío para empezar a dibujar.',
     sprinkler: 'Clic en un nodo o sobre un tubo para colocar un rociador.',
+    calibrate:
+      store.project.underlay?.kind === 'dxf'
+        ? 'El cursor se ajusta a los extremos de las líneas del DXF. Esc cancela.'
+        : 'Acerque la vista y haga clic con precisión en los dos puntos. Esc cancela.',
+    'move-plan': 'El destino se ajusta a los nodos del sistema. Esc cancela.',
   };
   $('hint').textContent = hints[store.tool];
 }
@@ -299,8 +334,12 @@ function drawTarget(ev: PointerEvent): DrawPoint | null {
     return { point: a.clone().addScaledVector(ab, t), pipeId: pipe.id };
   }
 
-  // 3) plano horizontal
+  // 3) extremos y vértices del plano DXF
   const z = drawStart ? drawStart.point.z : drawElevation;
+  const ps = viewer.underlaySnap(ev);
+  if (ps) return { point: new THREE.Vector3(ps.x, ps.y, z), onPlan: true };
+
+  // 4) plano horizontal
   const p = viewer.planePoint(ev, z);
   if (!p) return null;
   if (!drawStart) return { point: new THREE.Vector3(snap(p.x), snap(p.y), z) };
@@ -377,6 +416,7 @@ canvas.addEventListener('pointerup', (e) => {
   if (!down || down.button !== e.button || Math.hypot(e.clientX - down.x, e.clientY - down.y) > 5) return;
   down = null;
   if (e.button === 2) {
+    if (store.tool === 'calibrate' || store.tool === 'move-plan') return setTool('select');
     if (store.tool === 'draw' && drawStart) {
       drawStart = null;
       viewer.setPreview(null, null);
@@ -386,14 +426,23 @@ canvas.addEventListener('pointerup', (e) => {
   }
   if (e.button !== 0) return;
   if (store.tool === 'draw') return onDrawClick(e);
+  if (store.tool === 'calibrate' || store.tool === 'move-plan') return onMeasureClick(e);
   if (store.tool === 'sprinkler') return onSprinklerClick(e);
   const hit = viewer.pick(e);
   store.select(hit ? { kind: hit.kind, id: hit.id } : null);
 });
 canvas.addEventListener('pointermove', (e) => {
-  if (store.tool !== 'draw' || e.buttons) return;
+  if (e.buttons) return;
+  if (store.tool === 'calibrate' || store.tool === 'move-plan') {
+    if (measure.b) return;
+    const t = measureTarget(e);
+    viewer.setPreview(measure.a, t?.point ?? null, !!t?.snapped);
+    if (t && measure.a) $('hint').textContent = `Distancia ${fmt('length', t.point.distanceTo(measure.a), store.project.displayUnits, true)}`;
+    return;
+  }
+  if (store.tool !== 'draw') return;
   const t = drawTarget(e);
-  viewer.setPreview(drawStart?.point ?? null, t?.point ?? null, !!t?.nodeId || !!t?.pipeId);
+  viewer.setPreview(drawStart?.point ?? null, t?.point ?? null, !!t?.nodeId || !!t?.pipeId || !!t?.onPlan);
   if (t && drawStart) {
     const len = t.point.distanceTo(drawStart.point);
     $('hint').textContent = `Longitud ${fmt('length', len, store.project.displayUnits, true)}. Esc o clic derecho termina.`;
@@ -401,15 +450,168 @@ canvas.addEventListener('pointermove', (e) => {
 });
 canvas.addEventListener('contextmenu', (e) => e.preventDefault());
 
+// ---------- Plano de fondo ----------
+let measure: { a: THREE.Vector3 | null; b: THREE.Vector3 | null } = { a: null, b: null };
+let currentAsset: UnderlayAsset | undefined;
+let currentAssetKey = '';
+
+const underlayKey = (u: NonNullable<Project['underlay']>) => `${u.dataId}|${u.kind === 'pdf' ? u.page ?? 1 : ''}|${u.kind !== 'dxf' && u.invert ? 1 : 0}`;
+
+/** Pone en la vista el plano del proyecto, leyéndolo si hace falta. */
+function syncUnderlay() {
+  const u = store.project.underlay;
+  const data = u ? store.attached.get(u.dataId) : undefined;
+  if (!u || !data) {
+    currentAsset = undefined;
+    currentAssetKey = '';
+    viewer.setUnderlay(undefined, undefined);
+    return;
+  }
+  const key = underlayKey(u);
+  if (key === currentAssetKey && currentAsset) {
+    viewer.setUnderlay(u, currentAsset);
+    return;
+  }
+  if (currentAsset) viewer.setUnderlay(u, currentAsset); // mientras se lee la nueva página
+  currentAssetKey = key;
+  loadAsset(u, data)
+    .then((asset) => {
+      if (currentAssetKey !== key) return;
+      currentAsset = asset;
+      const now = store.project.underlay;
+      viewer.setUnderlay(now, asset);
+      renderLeft($('left'));
+    })
+    .catch((err) => flash(`No se pudo leer el plano: ${(err as Error).message}`));
+}
+
+function measureTarget(ev: PointerEvent): { point: THREE.Vector3; snapped: boolean } | null {
+  // al mover, el destino se ajusta a los nodos del sistema (por ejemplo, el montante)
+  if (store.tool === 'move-plan' && measure.a) {
+    for (const n of store.project.nodes) {
+      const s = viewer.toScreen(new THREE.Vector3(n.x, n.y, n.z));
+      const rect = viewer.renderer.domElement.getBoundingClientRect();
+      if (Math.hypot(s.x - (ev.clientX - rect.left), s.y - (ev.clientY - rect.top)) < 12) {
+        return { point: new THREE.Vector3(n.x, n.y, store.project.underlay?.z ?? 0), snapped: true };
+      }
+    }
+  }
+  const snap = viewer.underlaySnap(ev);
+  if (snap) return { point: snap, snapped: true };
+  const p = viewer.underlayPoint(ev);
+  return p ? { point: p, snapped: false } : null;
+}
+
+function onMeasureClick(ev: PointerEvent) {
+  const t = measureTarget(ev);
+  if (!t) return;
+  if (!measure.a) {
+    measure.a = t.point;
+  } else if (!measure.b) {
+    if (t.point.distanceTo(measure.a) < 1e-6) return;
+    measure.b = t.point;
+    if (store.tool === 'move-plan') {
+      const dx = measure.b.x - measure.a.x;
+      const dy = measure.b.y - measure.a.y;
+      store.mutate((p) => {
+        if (!p.underlay) return;
+        p.underlay.x += dx;
+        p.underlay.y += dy;
+      });
+      flash('Plano movido');
+      return setTool('select');
+    }
+    viewer.setPreview(measure.a, measure.b, true);
+  }
+  renderToolOptions();
+}
+
+function applyCalibration(measured: number, real: number) {
+  const a = measure.a;
+  if (!a || !(real > 0) || !(measured > 0)) return;
+  const local = viewer.worldToPlan(a.x, a.y);
+  store.mutate((p) => {
+    const u = p.underlay;
+    if (!u) return;
+    u.scale *= real / measured;
+    // el primer punto queda donde estaba
+    const r = (u.rotation * Math.PI) / 180;
+    u.x = a.x - u.scale * (local.x * Math.cos(r) - local.y * Math.sin(r));
+    u.y = a.y - u.scale * (local.x * Math.sin(r) + local.y * Math.cos(r));
+    u.calibrated = true;
+  });
+  flash('Escala calibrada');
+  setTool('select');
+}
+
+planHooks.asset = () => (store.project.underlay && currentAssetKey === underlayKey(store.project.underlay) ? currentAsset : undefined);
+planHooks.load = async (given?: File) => {
+  const file = given ?? (await pickPlanFile());
+  if (!file) return;
+  flash('Leyendo el plano…');
+  try {
+    const { meta, data, asset } = await createUnderlay(file);
+    store.attached.set(meta.dataId, data);
+    currentAsset = asset;
+    currentAssetKey = underlayKey(meta);
+    store.mutate((p) => (p.underlay = meta));
+    store.recalcNow();
+    setView('top');
+    flash(meta.calibrated ? 'Plano cargado' : 'Plano cargado. Calibre la escala con una medida conocida.');
+  } catch (err) {
+    flash((err as Error).message);
+  }
+};
+planHooks.calibrate = () => {
+  if (!store.project.underlay?.visible) return flash('Muestre el plano para calibrarlo');
+  if (viewer.view === '3d') setView('top');
+  setTool('calibrate');
+};
+planHooks.move = () => {
+  if (!store.project.underlay?.visible) return flash('Muestre el plano para moverlo');
+  setTool('move-plan');
+};
+planHooks.remove = () => store.mutate((p) => delete p.underlay);
+
+// Arrastrar un plano (DXF, PDF o imagen) o un proyecto .rcad sobre la vista
+const stage = $('stage');
+stage.addEventListener('dragover', (e) => {
+  if (e.dataTransfer?.types.includes('Files')) {
+    e.preventDefault();
+    stage.classList.add('dropping');
+  }
+});
+stage.addEventListener('dragleave', () => stage.classList.remove('dropping'));
+stage.addEventListener('drop', async (e) => {
+  e.preventDefault();
+  stage.classList.remove('dropping');
+  const file = e.dataTransfer?.files?.[0];
+  if (!file) return;
+  if (file.name.toLowerCase().endsWith('.rcad')) {
+    if (!(await confirmDiscard())) return;
+    try {
+      const n = normalize(JSON.parse(await file.text()));
+      store.load(n.project, { path: null, name: file.name }, n.attached);
+      setTool('select');
+      viewer.fit();
+    } catch (err) {
+      flash(`No se pudo abrir: ${(err as Error).message}`);
+    }
+    return;
+  }
+  planHooks.load(file);
+});
+
 // ---------- Archivos ----------
-function normalize(raw: unknown): Project {
-  const p = raw as Project;
+function normalize(raw: unknown): { project: Project; attached: Record<string, AttachedData> } {
+  if (!raw || typeof raw !== 'object') throw new Error('El archivo no es un proyecto de RociaCAD.');
+  const { underlayData, ...p } = raw as ProjectFile;
   if (!p || p.format !== 'rociacad' || !Array.isArray(p.nodes) || !Array.isArray(p.pipes)) {
     throw new Error('El archivo no es un proyecto de RociaCAD.');
   }
   if (p.version > FILE_FORMAT_VERSION) throw new Error('El archivo fue creado con una versión más nueva de RociaCAD.');
   const base = emptyProject();
-  return {
+  const project: Project = {
     ...base,
     ...p,
     info: { ...base.info, ...p.info },
@@ -418,6 +620,17 @@ function normalize(raw: unknown): Project {
     sprinklers: p.sprinklers ?? [],
     pipes: p.pipes.map((pp) => ({ ...pp, fittings: pp.fittings ?? [] })),
   };
+  if (project.underlay && !underlayData?.[project.underlay.dataId]) delete project.underlay;
+  return { project, attached: underlayData ?? {} };
+}
+
+/** Texto del archivo .rcad: el proyecto más los datos del plano de fondo */
+function projectFileContent(): string {
+  const file: ProjectFile = { ...store.project };
+  const u = store.project.underlay;
+  const data = u ? store.attached.get(u.dataId) : undefined;
+  if (u && data) file.underlayData = { [u.dataId]: data };
+  return JSON.stringify(file, null, 1);
 }
 
 async function confirmDiscard(): Promise<boolean> {
@@ -452,11 +665,13 @@ const actions = {
       if (desktop) {
         const f = await desktop.openFile();
         if (!f) return;
-        store.load(normalize(JSON.parse(f.content)), { path: f.path, name: f.name });
+        const n = normalize(JSON.parse(f.content));
+        store.load(n.project, { path: f.path, name: f.name }, n.attached);
       } else {
         const f = await pickFile();
         if (!f) return;
-        store.load(normalize(JSON.parse(await f.text())), { path: null, name: f.name });
+        const n = normalize(JSON.parse(await f.text()));
+        store.load(n.project, { path: null, name: f.name }, n.attached);
       }
       setTool('select');
       viewer.fit();
@@ -466,7 +681,7 @@ const actions = {
     }
   },
   async save(asNew = false): Promise<boolean> {
-    const content = JSON.stringify(store.project, null, 1);
+    const content = projectFileContent();
     if (desktop) {
       const r = await desktop.saveFile({ path: asNew ? undefined : store.filePath ?? undefined, content, suggestedName: fileBaseName() });
       if (!r) return false;
@@ -536,6 +751,8 @@ desktop?.onMenu(async (action) => {
       return;
     case 'export-pdf':
       return actions.exportPdf();
+    case 'load-plan':
+      return planHooks.load();
     case 'example-tree':
       return actions.example('tree');
     case 'example-grid':
@@ -643,9 +860,14 @@ async function start() {
       /* versión por defecto */
     }
   }
+  try {
+    setMaxTexture(viewer.renderer.capabilities.maxTextureSize);
+  } catch {
+    /* sin WebGL */
+  }
   store.load(exampleWarehouse());
   // Acceso para pruebas automáticas (solo si se abre con #debug)
-  if (location.hash === '#debug') Object.assign(window, { rociaDebug: { store, viewer, actions, setTool, setView } });
+  if (location.hash === '#debug') Object.assign(window, { rociaDebug: { store, viewer, actions, setTool, setView, planHooks, projectFileContent, normalize } });
   renderViewSwitch();
   setTool('select');
   viewer.fit();

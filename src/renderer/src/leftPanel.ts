@@ -4,11 +4,12 @@
 import { fmt, HAZARD_NAMES, HAZARDS, suggestDesignArea, unitLabel, type HazardId } from '../../core';
 import { clear, h } from './dom';
 import { flash, numField, rerender, selectField, textField } from './fields';
+import { planSection } from './planPanel';
 import { store } from './state';
 import { supplyChartSvg } from './supplyChart';
 
 export function renderLeft(el: HTMLElement) {
-  rerender(el, () => clear(el, verdict(), projectSection(), criteriaSection(), supplySection(), areaSection()));
+  rerender(el, () => clear(el, verdict(), planSection(), projectSection(), criteriaSection(), supplySection(), areaSection()));
 }
 
 function verdict(): HTMLElement {

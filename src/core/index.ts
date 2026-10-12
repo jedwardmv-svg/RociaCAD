@@ -9,3 +9,4 @@ export * from './calculate';
 export * from './bom';
 export * from './example';
 export * from './edit';
+export * from './dxf';

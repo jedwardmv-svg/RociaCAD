@@ -1026,3 +1026,89 @@ table.grid tbody tr.idle td {
   width: 96px;
   height: 26px;
 }
+
+.muted-text {
+  margin: 0 0 6px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.notice {
+  margin: 6px 0;
+  padding: 6px 8px;
+  border-radius: var(--r-sm);
+  background: var(--warn-soft);
+  color: var(--warn);
+  font-size: 13px;
+}
+
+.readout dd.ellipsis {
+  max-width: 170px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--ui);
+}
+
+input[type='range'] {
+  width: 100%;
+  accent-color: var(--ink);
+}
+
+details.layers {
+  margin-top: 8px;
+  font-size: 13px;
+}
+
+details.layers summary {
+  cursor: pointer;
+  color: var(--ink);
+}
+
+details.layers ul {
+  max-height: 220px;
+  overflow-y: auto;
+  margin: 6px 0 0;
+  padding: 0;
+  list-style: none;
+  border: 1px solid var(--line-soft);
+  border-radius: var(--r-sm);
+  background: var(--surface);
+}
+
+details.layers li .check {
+  margin: 0;
+  padding: 3px 6px;
+}
+
+details.layers li .check span {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+details.layers li small {
+  color: var(--muted);
+  font-family: var(--num);
+}
+
+#tool-options .measure-input {
+  width: 110px;
+}
+
+#stage.dropping::after {
+  content: 'Suelte aquí el plano (DXF, PDF o imagen)';
+  position: absolute;
+  inset: 12px;
+  z-index: 5;
+  display: grid;
+  place-items: center;
+  border: 2px dashed #9fb3c4;
+  border-radius: var(--r-md);
+  background: rgba(36, 48, 58, 0.7);
+  color: #e8edf1;
+  font-size: 16px;
+  font-weight: 600;
+  pointer-events: none;
+}
