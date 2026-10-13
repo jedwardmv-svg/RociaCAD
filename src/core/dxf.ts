@@ -8,6 +8,7 @@
  */
 import DxfParser from 'dxf-parser';
 import { ShapeUtils, Vector2 } from 'three';
+import { addHatchHandler } from './dxfHatch';
 import { mtextPlain, textLineStrokes, textLineWidth, wrapText } from './planText';
 
 /** Triangula un polígono con huecos (índices de los vértices) */
@@ -55,6 +56,269 @@ export interface DxfResult {
   /** el dibujo tiene alturas distintas (modelo en 3D) */
   is3D: boolean;
   zRange: { min: number; max: number };
+  /** presentaciones (espacio papel), si el archivo las trae */
+  layouts?: PlanLayout[];
+}
+
+/** Ventana de una presentación que muestra una parte del modelo */
+export interface LayoutViewport {
+  /** centro y tamaño en la hoja (unidades de papel) */
+  center: { x: number; y: number };
+  width: number;
+  height: number;
+  /** centro de la vista y altura que muestra, en unidades del modelo */
+  viewCenter: { x: number; y: number };
+  viewHeight: number;
+  target: { x: number; y: number; z?: number };
+  direction: { x: number; y: number; z?: number };
+  /** giro de la vista (radianes) */
+  twist: number;
+  /** capas congeladas en esta ventana */
+  frozenLayers: string[];
+}
+
+/** Presentación: lo dibujado en la hoja más las ventanas al modelo */
+export interface PlanLayout {
+  name: string;
+  order: number;
+  layers: DxfLayer[];
+  snapPoints: number[];
+  /** caja de la hoja */
+  bounds: { minX: number; minY: number; maxX: number; maxY: number };
+  viewports: LayoutViewport[];
+}
+
+/**
+ * Arma una presentación lista para dibujar: su contenido propio más el modelo visto por cada
+ * ventana (proyectado, escalado y recortado al rectángulo de la ventana).
+ */
+export function layoutPlan(model: DxfResult, layout: PlanLayout): DxfResult {
+  const layers = new Map<string, DxfLayer>();
+  const get = (src: DxfLayer) => {
+    let l = layers.get(src.name);
+    if (!l) layers.set(src.name, (l = { name: src.name, segments: [], colors: [], fills: [], fillColors: [], color: src.color, off: src.off }));
+    return l;
+  };
+  for (const l of layout.layers) {
+    const d = get(l);
+    d.segments.push(...l.segments.map((v, i) => (i % 3 === 2 ? 0 : v)));
+    d.colors.push(...l.colors);
+    d.fills.push(...l.fills.map((v, i) => (i % 3 === 2 ? 0 : v)));
+    d.fillColors.push(...l.fillColors);
+  }
+  let segs = 0;
+  for (const vp of layout.viewports) {
+    // ejes de la vista: Z hacia el observador, X horizontal en la hoja
+    const dz = vp.direction;
+    let len = Math.hypot(dz.x, dz.y, dz.z ?? 0) || 1;
+    const Z = { x: dz.x / len, y: dz.y / len, z: (dz.z ?? 0) / len };
+    let X = Math.abs(Z.x) < 1e-9 && Math.abs(Z.y) < 1e-9 ? { x: 1, y: 0, z: 0 } : { x: -Z.y, y: Z.x, z: 0 };
+    len = Math.hypot(X.x, X.y, X.z) || 1;
+    X = { x: X.x / len, y: X.y / len, z: X.z / len };
+    const Y = { x: Z.y * X.z - Z.z * X.y, y: Z.z * X.x - Z.x * X.z, z: Z.x * X.y - Z.y * X.x };
+    const k = vp.height / vp.viewHeight;
+    const ct = Math.cos(-vp.twist);
+    const st = Math.sin(-vp.twist);
+    const tx = vp.target.x;
+    const ty = vp.target.y;
+    const tz = vp.target.z ?? 0;
+    const x0 = vp.center.x - vp.width / 2;
+    const x1 = vp.center.x + vp.width / 2;
+    const y0 = vp.center.y - vp.height / 2;
+    const y1 = vp.center.y + vp.height / 2;
+    const proj = (x: number, y: number, z: number): [number, number] => {
+      const px = x - tx;
+      const py = y - ty;
+      const pz = z - tz;
+      const u = (px * X.x + py * X.y + pz * X.z - vp.viewCenter.x) * k;
+      const v = (px * Y.x + py * Y.y + pz * Y.z - vp.viewCenter.y) * k;
+      return [vp.center.x + u * ct - v * st, vp.center.y + u * st + v * ct];
+    };
+    const frozen = new Set(vp.frozenLayers);
+    for (const src of model.layers) {
+      if (frozen.has(src.name) || src.off) continue;
+      const d = get(src);
+      const s = src.segments;
+      for (let i = 0, t = 0; i < s.length; i += 6, t++) {
+        const [ax, ay] = proj(s[i], s[i + 1], s[i + 2]);
+        const [bx, by] = proj(s[i + 3], s[i + 4], s[i + 5]);
+        // recorte de Liang-Barsky al rectángulo de la ventana
+        let u0 = 0;
+        let u1 = 1;
+        const dx = bx - ax;
+        const dy = by - ay;
+        let ok = true;
+        for (const [p, q] of [[-dx, ax - x0], [dx, x1 - ax], [-dy, ay - y0], [dy, y1 - ay]] as [number, number][]) {
+          if (p === 0) {
+            if (q < 0) {
+              ok = false;
+              break;
+            }
+          } else {
+            const r = q / p;
+            if (p < 0) {
+              if (r > u1) {
+                ok = false;
+                break;
+              }
+              if (r > u0) u0 = r;
+            } else {
+              if (r < u0) {
+                ok = false;
+                break;
+              }
+              if (r < u1) u1 = r;
+            }
+          }
+        }
+        if (!ok) continue;
+        d.segments.push(ax + dx * u0, ay + dy * u0, 0, ax + dx * u1, ay + dy * u1, 0);
+        d.colors.push(src.colors[t]);
+        segs++;
+      }
+      // rellenos: los triángulos que quedan dentro de la ventana
+      const f = src.fills;
+      for (let i = 0, t = 0; i < f.length; i += 9, t++) {
+        const A = proj(f[i], f[i + 1], f[i + 2]);
+        const B = proj(f[i + 3], f[i + 4], f[i + 5]);
+        const C = proj(f[i + 6], f[i + 7], f[i + 8]);
+        const inside = (q: [number, number]) => q[0] >= x0 && q[0] <= x1 && q[1] >= y0 && q[1] <= y1;
+        if (!inside(A) || !inside(B) || !inside(C)) continue;
+        d.fills.push(A[0], A[1], 0, B[0], B[1], 0, C[0], C[1], 0);
+        d.fillColors.push(src.fillColors[t]);
+      }
+    }
+    // borde de la ventana
+  }
+  const out = [...layers.values()].filter((l) => l.segments.length || l.fills.length).sort((a, b) => a.name.localeCompare(b.name, 'es', { numeric: true }));
+  return {
+    layers: out,
+    insUnits: 0,
+    ftPerUnit: undefined,
+    bounds: layout.bounds,
+    snapPoints: layout.snapPoints,
+    stats: { entities: 0, segments: segs, texts: 0, fills: 0, skipped: {} },
+    is3D: false,
+    zRange: { min: 0, max: 0 },
+  };
+}
+
+/** Ventana leída del archivo (DXF o DWG), antes de decidir si es la hoja o una vista */
+export interface RawViewport extends LayoutViewport {
+  id?: number;
+  visible?: boolean;
+}
+
+/** Pasa una entidad VIEWPORT (campos al estilo LibreDWG) a una ventana */
+export function readViewport(e: AnyEntity, layerByHandle: Map<string, string>): RawViewport | undefined {
+  const c = e.viewportCenter as Pt | undefined;
+  if (!c) return undefined;
+  return {
+    id: Number(e.viewportId) || undefined,
+    visible: e.isVisible !== false,
+    center: { x: c.x, y: c.y },
+    width: Number(e.width) || 0,
+    height: Number(e.height) || 0,
+    viewCenter: (e.displayCenter as Pt | undefined) ?? { x: 0, y: 0 },
+    viewHeight: Number(e.viewHeight) || 0,
+    target: (e.targetPoint as Pt | undefined) ?? { x: 0, y: 0, z: 0 },
+    direction: (e.viewDirection as Pt | undefined) ?? { x: 0, y: 0, z: 1 },
+    twist: Number(e.viewTwistAngle) || 0,
+    frozenLayers: ((e.frozenLayerIds as string[] | undefined) ?? []).map((hd) => layerByHandle.get(String(hd).toUpperCase())).filter((n): n is string => !!n),
+  };
+}
+
+/**
+ * Arma una presentación con lo dibujado en la hoja y sus ventanas. Devuelve undefined si está vacía.
+ */
+export function makeLayout(
+  name: string,
+  order: number,
+  paperEntities: AnyEntity[],
+  rawViewports: RawViewport[],
+  blocks: PlanBlocks,
+  insUnits: number,
+  format: string,
+  table: LayerTable,
+  styles: TextStyles = {},
+): PlanLayout | undefined {
+  const viewports: LayoutViewport[] = [];
+  let sheet: RawViewport | undefined;
+  const near = (a: number, b: number) => Math.abs(a - b) <= 1e-6 * Math.max(1, Math.abs(a), Math.abs(b));
+  for (const vp of rawViewports) {
+    if (vp.visible === false) continue;
+    // la ventana 1 es la hoja misma (muestra el papel a escala 1:1, centrada en sí misma)
+    const isSheet = vp.id === 1 || (near(vp.viewHeight, vp.height) && near(vp.viewCenter.x, vp.center.x) && near(vp.viewCenter.y, vp.center.y));
+    if (isSheet) sheet = vp;
+    else if (vp.width > 0 && vp.height > 0 && vp.viewHeight > 0) {
+      const { id: _id, visible: _v, ...rest } = vp;
+      viewports.push(rest);
+    }
+  }
+  let paper: DxfResult | undefined;
+  try {
+    paper = paperEntities.length ? buildPlan(paperEntities, blocks, insUnits, format, table, styles) : undefined;
+  } catch {
+    paper = undefined;
+  }
+  const hasPaper = !!paper && paper.layers.some((l) => l.segments.length || l.fills.length);
+  if (!hasPaper && !viewports.length) return undefined;
+  // caja: el dibujo de la hoja más las ventanas (la ventana 1 solo si no hay nada más)
+  let b = { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity };
+  const grow = (x0: number, y0: number, x1: number, y1: number) => {
+    b = { minX: Math.min(b.minX, x0), minY: Math.min(b.minY, y0), maxX: Math.max(b.maxX, x1), maxY: Math.max(b.maxY, y1) };
+  };
+  const rect = (v: LayoutViewport) => grow(v.center.x - v.width / 2, v.center.y - v.height / 2, v.center.x + v.width / 2, v.center.y + v.height / 2);
+  if (hasPaper) grow(paper!.bounds.minX, paper!.bounds.minY, paper!.bounds.maxX, paper!.bounds.maxY);
+  viewports.forEach(rect);
+  if (!isFinite(b.minX) && sheet) rect(sheet);
+  if (!isFinite(b.minX)) b = { minX: 0, minY: 0, maxX: 1, maxY: 1 };
+  return { name, order, layers: hasPaper ? paper!.layers : [], snapPoints: paper?.snapPoints ?? [], bounds: b, viewports };
+}
+
+/**
+ * Datos del DXF que dxf-parser no lee: los identificadores de las capas y las presentaciones
+ * (nombre, orden y el bloque *Paper_Space de cada una), sacados del texto del archivo.
+ */
+function scanDxfExtras(text: string) {
+  const lines = text.split(/\r?\n/);
+  const layerByHandle = new Map<string, string>();
+  const layouts: { name: string; order: number; record: string }[] = [];
+  let section = '';
+  for (let i = 0; i + 1 < lines.length; i += 2) {
+    const code = lines[i].trim();
+    const value = lines[i + 1].trim();
+    if (code !== '0') continue;
+    if (value === 'SECTION') {
+      section = (lines[i + 3] ?? '').trim();
+      continue;
+    }
+    if (section === 'TABLES' && value === 'LAYER') {
+      let handle = '';
+      let name = '';
+      for (let j = i + 2; j + 1 < lines.length && lines[j].trim() !== '0'; j += 2) {
+        const c = lines[j].trim();
+        if (c === '5') handle = lines[j + 1].trim();
+        else if (c === '2') name = lines[j + 1].trim();
+      }
+      if (handle && name) layerByHandle.set(handle.toUpperCase(), name);
+    } else if (section === 'OBJECTS' && value === 'LAYOUT') {
+      let name = '';
+      let order = 0;
+      let record = '';
+      let inLayout = false;
+      for (let j = i + 2; j + 1 < lines.length && lines[j].trim() !== '0'; j += 2) {
+        const c = lines[j].trim();
+        const v = lines[j + 1].trim();
+        if (c === '100' && v === 'AcDbLayout') inLayout = true;
+        else if (inLayout && c === '1') name = v;
+        else if (inLayout && c === '71') order = Number(v) || 0;
+        else if (inLayout && c === '330') record = v;
+      }
+      if (name && record) layouts.push({ name, order, record: record.toUpperCase() });
+    }
+  }
+  return { layerByHandle, layouts };
 }
 
 /** Pies por unidad para los códigos $INSUNITS más comunes. */
@@ -146,11 +410,27 @@ export interface AnyEntity {
 
 export type PlanBlocks = Record<string, { entities?: AnyEntity[]; position?: Pt }>;
 
+/** Estilos de texto del archivo: factor de ancho y archivo de letra (romans.shx, arial.ttf…) */
+export type TextStyles = Record<string, { widthFactor?: number; font?: string }>;
+
+/**
+ * Ancho de una letra TrueType respecto a la fuente de trazos (que tiene las proporciones de romans.shx).
+ * AutoCAD toma la altura del texto como la altura de las mayúsculas; con eso Arial sale más angosta.
+ */
+export function fontWidthFactor(font: string | undefined): number {
+  const f = (font ?? '').toLowerCase();
+  if (!/\.(ttf|ttc|otf)$/.test(f)) return 1;
+  if (/narrow|arialn|condensed|cn|swis721_cn/.test(f)) return 0.72;
+  if (/bd|bold|black|heavy/.test(f)) return 0.9;
+  return 0.87;
+}
+
 /** Datos de las capas del archivo: color y si está apagada o congelada */
 export type LayerTable = Record<string, { color?: number; colorIndex?: number; off?: boolean }>;
 
 export function parseDxf(text: string): DxfResult {
   const parser = new DxfParser();
+  addHatchHandler(parser);
   const dxf = parser.parseSync(text);
   if (!dxf) throw new Error('El archivo DXF está vacío o no se pudo leer.');
   const header = (dxf.header ?? {}) as Record<string, unknown>;
@@ -159,7 +439,43 @@ export function parseDxf(text: string): DxfResult {
   const table: LayerTable = {};
   const raw = ((dxf.tables as unknown as { layer?: { layers?: Record<string, { color?: number; colorIndex?: number; visible?: boolean; frozen?: boolean }> } })?.layer?.layers ?? {});
   for (const [name, l] of Object.entries(raw)) table[name] = { color: l.color, colorIndex: l.colorIndex, off: l.visible === false || !!l.frozen };
-  return buildPlan((dxf.entities ?? []) as unknown as AnyEntity[], blocks, insUnits, 'DXF', table);
+  const all = (dxf.entities ?? []) as unknown as AnyEntity[];
+  // lo que está en el espacio papel es de la presentación activa, no del modelo
+  const modelEnts = all.filter((e) => !e.inPaperSpace && e.type !== 'VIEWPORT');
+  const plan = buildPlan(modelEnts, blocks, insUnits, 'DXF', table);
+  try {
+    const layouts = dxfLayouts(text, all, blocks, insUnits, table);
+    if (layouts.length) plan.layouts = layouts;
+  } catch {
+    // si las presentaciones no se pueden leer, queda el modelo
+  }
+  return plan;
+}
+
+function dxfLayouts(text: string, all: AnyEntity[], blocks: PlanBlocks, insUnits: number, table: LayerTable): PlanLayout[] {
+  const { layerByHandle, layouts: meta } = scanDxfExtras(text);
+  const out: PlanLayout[] = [];
+  const blockList = Object.entries(blocks as Record<string, { entities?: AnyEntity[]; ownerHandle?: string }>);
+  const paperBlocks = blockList.filter(([name]) => /^\*paper_space/i.test(name));
+  for (const [name, blk] of paperBlocks) {
+    // la presentación activa guarda su dibujo en ENTITIES; las demás, en su bloque
+    const active = /^\*paper_space$/i.test(name);
+    const ents = active ? all.filter((e) => e.inPaperSpace) : (blk.entities ?? []);
+    const m = meta.find((l) => blk.ownerHandle && l.record === String(blk.ownerHandle).toUpperCase());
+    const vps = ents.filter((e) => e.type === 'VIEWPORT').map((e) => readViewport(e, layerByHandle)).filter((v): v is RawViewport => !!v);
+    const lay = makeLayout(
+      m?.name ?? `Presentación ${out.length + 1}`,
+      m?.order ?? out.length + 1,
+      ents.filter((e) => e.type !== 'VIEWPORT'),
+      vps,
+      blocks,
+      insUnits,
+      'DXF',
+      table,
+    );
+    if (lay) out.push(lay);
+  }
+  return out.sort((a, b) => a.order - b.order);
 }
 
 // ---------- Colores ----------
@@ -187,7 +503,7 @@ export function aciColor(i: number): number {
 const WHITE = 0xffffff;
 
 /** Convierte entidades (con la forma de dxf-parser) en segmentos, rellenos y textos por capa. */
-export function buildPlan(entities: AnyEntity[], blocks: PlanBlocks, insUnits: number, format = 'DXF', layerTable: LayerTable = {}): DxfResult {
+export function buildPlan(entities: AnyEntity[], blocks: PlanBlocks, insUnits: number, format = 'DXF', layerTable: LayerTable = {}, styles: TextStyles = {}): DxfResult {
   interface Acc {
     segments: number[];
     colors: number[];
@@ -358,8 +674,109 @@ export function buildPlan(entities: AnyEntity[], blocks: PlanBlocks, insUnits: n
     });
   };
 
+  // ---------- estilos de texto ----------
+  const styleIdx = new Map<string, { widthFactor?: number; font?: string }>();
+  for (const [k, v] of Object.entries(styles)) styleIdx.set(k.toLowerCase(), v);
+  /** factor de ancho del estilo y de su letra */
+  const styleWidth = (e: AnyEntity, withStyleFactor: boolean): number => {
+    const st = styleIdx.get(String(e.styleName ?? e.style ?? 'standard').toLowerCase());
+    const wf = withStyleFactor ? Number(st?.widthFactor) || 1 : 1;
+    return wf * fontWidthFactor(st?.font);
+  };
+
+  // ---------- tuberías en 3D ----------
+  // AutoSPRINK y otros programas dibujan cada tubo como su eje (LINE) con un círculo del
+  // diámetro del tubo en un extremo, perpendicular al eje. Esos ejes se dibujan como tubos.
+  const pipeRadius = new WeakMap<AnyEntity, number>();
+  const pipeScanned = new WeakSet<AnyEntity[]>();
+  const markPipes = (list: AnyEntity[]) => {
+    if (pipeScanned.has(list)) return;
+    pipeScanned.add(list);
+    const circles: { c: V3; n: V3; r: number }[] = [];
+    for (const e of list) {
+      if (e.type !== 'CIRCLE') continue;
+      const r = Number(e.radius) || 0;
+      const n = extOf(e);
+      const c = e.center as Pt | undefined;
+      if (!(r > 0) || !n || !c) continue;
+      const len = Math.hypot(n.x, n.y, n.z) || 1;
+      circles.push({ c: apply(ocsMatrix(n), c), n: { x: n.x / len, y: n.y / len, z: n.z / len }, r });
+    }
+    if (!circles.length) return;
+    const seen = new Set<string>();
+    for (const e of list) {
+      if (e.type !== 'LINE') continue;
+      const v = e.vertices as Pt[] | undefined;
+      if (!v || v.length < 2) continue;
+      const p = v[0];
+      const q = v[1];
+      const d = { x: q.x - p.x, y: q.y - p.y, z: (q.z ?? 0) - (p.z ?? 0) };
+      const L = Math.hypot(d.x, d.y, d.z);
+      if (!(L > 0)) continue;
+      const tol = L * 1e-6 + 1e-9;
+      const at = (c: V3, pt: Pt) => Math.abs(c.x - pt.x) <= tol && Math.abs(c.y - pt.y) <= tol && Math.abs(c.z - (pt.z ?? 0)) <= tol;
+      const hit = circles.find(
+        (k) => (at(k.c, p) || at(k.c, q)) && Math.abs((k.n.x * d.x + k.n.y * d.y + k.n.z * d.z) / L) > 0.999 && k.r < L * 2,
+      );
+      if (!hit) continue;
+      // el mismo eje suele venir dos veces (con y sin grosor de línea): un solo tubo
+      const key = [p.x, p.y, p.z ?? 0, q.x, q.y, q.z ?? 0].map((x) => x.toFixed(6)).join(',');
+      if (seen.has(key)) continue;
+      seen.add(key);
+      pipeRadius.set(e, hit.r);
+    }
+  };
+  const TUBE_SIDES = 12;
+  const LIGHT = (() => {
+    const l = { x: -0.35, y: -0.45, z: 0.82 };
+    const n = Math.hypot(l.x, l.y, l.z);
+    return { x: l.x / n, y: l.y / n, z: l.z / n };
+  })();
+  const shade = (color: number, k: number) => {
+    const ch = (sh: number) => Math.min(255, Math.round(((color >> sh) & 255) * k));
+    return (ch(16) << 16) | (ch(8) << 8) | ch(0);
+  };
+  /** tubo (cilindro sin tapas) entre p y q, sombreado según su orientación en el dibujo */
+  const tube = (a: Acc, color: number, m: Mat, p: Pt, q: Pt, r: number) => {
+    const P = apply(m, p);
+    const Q = apply(m, q);
+    const d = { x: Q.x - P.x, y: Q.y - P.y, z: Q.z - P.z };
+    const L = Math.hypot(d.x, d.y, d.z);
+    if (!(L > 0)) return;
+    // el radio también se escala con el bloque
+    const unit = apply(m, { x: (p.x ?? 0) + r, y: p.y, z: p.z ?? 0 });
+    const R0 = apply(m, { x: p.x, y: p.y + r, z: p.z ?? 0 });
+    const rr = Math.max(Math.hypot(unit.x - P.x, unit.y - P.y, unit.z - P.z), Math.hypot(R0.x - P.x, R0.y - P.y, R0.z - P.z));
+    if (!(rr > 0) || !Number.isFinite(rr)) return;
+    const w = { x: d.x / L, y: d.y / L, z: d.z / L };
+    const ref = Math.abs(w.z) < 0.9 ? { x: 0, y: 0, z: 1 } : { x: 1, y: 0, z: 0 };
+    let u = { x: w.y * ref.z - w.z * ref.y, y: w.z * ref.x - w.x * ref.z, z: w.x * ref.y - w.y * ref.x };
+    const ul = Math.hypot(u.x, u.y, u.z);
+    u = { x: u.x / ul, y: u.y / ul, z: u.z / ul };
+    const v = { x: w.y * u.z - w.z * u.y, y: w.z * u.x - w.x * u.z, z: w.x * u.y - w.y * u.x };
+    const ring = (C: V3, t: number) => ({
+      x: C.x + rr * (u.x * Math.cos(t) + v.x * Math.sin(t)),
+      y: C.y + rr * (u.y * Math.cos(t) + v.y * Math.sin(t)),
+      z: C.z + rr * (u.z * Math.cos(t) + v.z * Math.sin(t)),
+    });
+    for (let i = 0; i < TUBE_SIDES; i++) {
+      const t0 = (2 * Math.PI * i) / TUBE_SIDES;
+      const t1 = (2 * Math.PI * (i + 1)) / TUBE_SIDES;
+      const tm = (t0 + t1) / 2;
+      const n = { x: u.x * Math.cos(tm) + v.x * Math.sin(tm), y: u.y * Math.cos(tm) + v.y * Math.sin(tm), z: u.z * Math.cos(tm) + v.z * Math.sin(tm) };
+      const k = 0.4 + 0.7 * Math.max(0, n.x * LIGHT.x + n.y * LIGHT.y + n.z * LIGHT.z);
+      const c = shade(color, k);
+      const a0 = ring(P, t0);
+      const a1 = ring(P, t1);
+      const b0 = ring(Q, t0);
+      const b1 = ring(Q, t1);
+      tri(a, c, I, a0, a1, b1);
+      tri(a, c, I, a0, b1, b0);
+    }
+    stats.fills += TUBE_SIDES * 2;
+  };
+
   const drawEntity = (e: AnyEntity, m: Mat, parentLayer: string, blockColor: number, depth: number) => {
-    if (e.inPaperSpace) return;
     if (e.visible === false) return;
     stats.entities++;
     const layer = !e.layer || (e.layer === '0' && parentLayer) ? parentLayer || '0' : e.layer;
@@ -369,6 +786,8 @@ export function buildPlan(entities: AnyEntity[], blocks: PlanBlocks, insUnits: n
       case 'LINE': {
         const v = e.vertices as Pt[] | undefined;
         if (v && v.length >= 2) {
+          const pr = pipeRadius.get(e);
+          if (pr) tube(a, color, m, v[0], v[1], pr);
           seg(a, color, m, v[0], v[1]);
           snapPt(m, v[0]);
           snapPt(m, v[1]);
@@ -491,16 +910,76 @@ export function buildPlan(entities: AnyEntity[], blocks: PlanBlocks, insUnits: n
         break;
       }
       case 'HATCH': {
-        // solo los rellenos sólidos (los patrones de rayado se omiten)
-        const solid = !!e.solidFill || /^solid$/i.test(String(e.patternName ?? ''));
-        if (!solid) {
-          stats.skipped.HATCH = (stats.skipped.HATCH ?? 0) + 1;
-          break;
-        }
         const loops = hatchLoops(e);
         if (!loops.length) break;
         const elev = Number(e.elevation ?? (e.elevationPoint as Pt | undefined)?.z ?? 0) || 0;
-        triangulate(a, color, ocs(e, m), loops.map((l) => l.map((p) => ({ ...p, z: elev }))));
+        const mm = ocs(e, m);
+        const solid = !!e.solidFill || /^solid$/i.test(String(e.patternName ?? ''));
+        if (solid) {
+          triangulate(a, color, mm, loops.map((l) => l.map((p) => ({ ...p, z: elev }))));
+          break;
+        }
+        // rayado: líneas del patrón recortadas por el contorno
+        const lines = (e.definitionLines ?? e.patternLines) as HatchLine[] | undefined;
+        if (!Array.isArray(lines) || !lines.length) {
+          stats.skipped.HATCH = (stats.skipped.HATCH ?? 0) + 1;
+          break;
+        }
+        const out: number[] = [];
+        hatchPattern(loops, lines, out);
+        for (let i = 0; i + 3 < out.length; i += 4) seg(a, color, mm, { x: out[i], y: out[i + 1], z: elev }, { x: out[i + 2], y: out[i + 3], z: elev });
+        break;
+      }
+      case 'MULTILEADER': {
+        // líneas guía con su flecha y el texto
+        const sections = (e.leaderSections ?? []) as { lastLeaderLinePoint?: Pt; doglegVector?: Pt; doglegLength?: number; leaderLines?: { vertices?: Pt[] }[] }[];
+        const arrow = Number(e.arrowheadSize ?? 0) || 0;
+        for (const sec of sections) {
+          const last = sec.lastLeaderLinePoint;
+          for (const ll of sec.leaderLines ?? []) {
+            const pts = [...(ll.vertices ?? [])];
+            if (last) pts.push(last);
+            polyline(a, color, m, pts, false);
+            // flecha en la punta
+            if (pts.length >= 2 && arrow > 0) {
+              const p0 = pts[0];
+              const p1 = pts[1];
+              const L = Math.hypot(p1.x - p0.x, p1.y - p0.y) || 1;
+              const ux = (p1.x - p0.x) / L;
+              const uy = (p1.y - p0.y) / L;
+              const w = arrow / 3;
+              tri(a, color, m, p0, { x: p0.x + ux * arrow - uy * w, y: p0.y + uy * arrow + ux * w, z: p0.z }, { x: p0.x + ux * arrow + uy * w, y: p0.y + uy * arrow - ux * w, z: p0.z });
+            }
+          }
+          if (last && sec.doglegVector && sec.doglegLength) {
+            const d = sec.doglegVector;
+            seg(a, color, m, last, { x: last.x + d.x * sec.doglegLength, y: last.y + d.y * sec.doglegLength, z: last.z });
+          }
+        }
+        const txt = String(e.textContent ?? '');
+        const anchor = e.textAnchor as Pt | undefined;
+        const h = Number(e.textHeight ?? 0);
+        if (txt.trim() && anchor && h > 0) {
+          stats.texts++;
+          drawEntity(
+            {
+              type: 'MTEXT',
+              layer: e.layer,
+              colorIndex: (e.colorIndex as number) ?? 256,
+              text: txt,
+              position: anchor,
+              height: h,
+              width: Number(e.textWidth ?? 0) || 0,
+              attachmentPoint: Number(e.textAttachmentPoint ?? 1) || 1,
+              direction: e.textDirection,
+            },
+            m,
+            parentLayer,
+            blockColor,
+            depth + 1,
+          );
+          stats.texts--;
+        }
         break;
       }
       case 'INSERT':
@@ -513,6 +992,7 @@ export function buildPlan(entities: AnyEntity[], blocks: PlanBlocks, insUnits: n
         if (!block?.entities) break;
         if (e.type === 'DIMENSION') {
           // la geometría de la cota ya está en coordenadas del dibujo
+          markPipes(block.entities);
           for (const child of block.entities) drawEntity(child, m, layer, color, depth + 1);
           break;
         }
@@ -527,6 +1007,7 @@ export function buildPlan(entities: AnyEntity[], blocks: PlanBlocks, insUnits: n
         const cs = (e.columnSpacing as number) ?? 0;
         const rs = (e.rowSpacing as number) ?? 0;
         const om = ocs(e, m);
+        markPipes(block.entities);
         for (let r = 0; r < rows; r++) {
           for (let c = 0; c < cols; c++) {
             // OCS · T(pos) · R(rot) · T(columna, fila) · S · T(−base)
@@ -552,33 +1033,59 @@ export function buildPlan(entities: AnyEntity[], blocks: PlanBlocks, insUnits: n
         const va = Number(e.valign ?? e.verticalJustification ?? 0) || 0;
         const start = (e.startPoint ?? e.position) as Pt | undefined;
         const end = e.endPoint as Pt | undefined;
-        // alineado o ajustado: se usa el punto inicial; los demás alineados usan el segundo punto
-        const useEnd = (ha !== 0 || va !== 0) && ha !== 3 && ha !== 5 && end && (end.x !== 0 || end.y !== 0);
-        const p = (useEnd ? end : start) ?? { x: 0, y: 0 };
         let rot = (((e.rotation as number) ?? 0) * Math.PI) / 180;
         if ((ha === 3 || ha === 5) && start && end) rot = Math.atan2(end.y - start.y, end.x - start.x);
+        const xs = Number(e.xScale ?? e.widthFactor ?? 1) || 1;
+        const wfFont = xs * styleWidth(e, false);
+        const z = (p: Pt) => p.z ?? Number(e.elevation ?? 0) ?? 0;
+        const base = { h, rot, lineGap: h * 1.667 };
+        // AutoCAD guarda en el primer punto el inicio real del texto (sobre la línea base) y en el
+        // segundo el punto de alineación: con los dos se sabe cuánto mide de ancho
+        const hasEnd = !!end && !!start && (end.x !== 0 || end.y !== 0) && (ha !== 0 || va !== 0);
+        if (hasEnd && ha !== 0 && start) {
+          const along = (end!.x - start.x) * Math.cos(rot) + (end!.y - start.y) * Math.sin(rot);
+          const real = ha === 1 || ha === 4 ? 2 * along : along;
+          const natural = textLineWidth(text, h, 1);
+          const k = natural > 0 ? real / natural : 0;
+          if (k > 0.2 && k < 5) {
+            drawText(a, color, ocs(e, m), [text], { ...base, x: start.x, y: start.y, z: z(start), wf: k, hAlign: 'left', vAlign: 'baseline' });
+            break;
+          }
+        }
+        const p = (hasEnd ? end : start) ?? { x: 0, y: 0 };
         drawText(a, color, ocs(e, m), [text], {
+          ...base,
           x: p.x,
           y: p.y,
-          z: p.z ?? Number(e.elevation ?? 0) ?? 0,
-          h,
-          rot,
-          wf: Number(e.xScale ?? e.widthFactor ?? 1) || 1,
+          z: z(p),
+          wf: wfFont,
           hAlign: ha === 1 || ha === 4 ? 'center' : ha === 2 ? 'right' : 'left',
           vAlign: ha === 4 ? 'middle' : va === 3 ? 'top' : va === 2 ? 'middle' : va === 1 ? 'bottom' : 'baseline',
-          lineGap: h * 1.667,
         });
         break;
       }
       case 'MTEXT': {
         stats.texts++;
         const raw = String(e.text ?? '');
-        const h = Number(e.height ?? e.textHeight ?? 0);
+        const h0 = Number(e.height ?? e.textHeight ?? 0);
         const p = (e.position ?? e.insertionPoint) as Pt | undefined;
-        if (!raw.trim() || !(h > 0) || !p) break;
+        if (!raw.trim() || !(h0 > 0) || !p) break;
+        // altura cambiada dentro del texto (\H2.5; o \H0.7x;)
+        const inlineH = /\\H(\d*\.?\d+)(x?);/.exec(raw);
+        const hv = inlineH ? Number(inlineH[1]) : 0;
+        const h = hv > 0 ? (inlineH![2] ? h0 * hv : hv) : h0;
         const width = Number(e.width ?? e.rectWidth ?? 0) || 0;
+        // ancho de letra: estilo, letra TrueType y el código \W del propio texto
+        const inlineW = /\\W(\d*\.?\d+)x?;/.exec(raw);
+        let wf = styleWidth(e, true) * (inlineW ? Number(inlineW[1]) || 1 : 1);
         const paras = mtextPlain(raw).split('\n');
-        const lines = paras.flatMap((para) => wrapText(para, h, width));
+        const lines = paras.flatMap((para) => wrapText(para, h, width, wf));
+        // AutoCAD guarda el ancho real del texto: se ajusta para que ocupe lo mismo
+        const ext = Number(e.extentsWidth ?? 0) || 0;
+        const natural = Math.max(...lines.map((l) => textLineWidth(l, h, wf)));
+        if (ext > 0 && natural > 0 && ext / natural > 0.6 && ext / natural < 1.6) wf *= ext / natural;
+        // párrafo centrado o a la derecha (\pxqc; \pxqr;) dentro del ancho del cuadro
+        const pq = /\\p[^;]*q([lcr])[^;]*;/.exec(raw)?.[1];
         const ap = Number(e.attachmentPoint ?? 1) || 1;
         const col = (ap - 1) % 3;
         const row = Math.floor((ap - 1) / 3);
@@ -598,14 +1105,22 @@ export function buildPlan(entities: AnyEntity[], blocks: PlanBlocks, insUnits: n
         }
         const Y = { x: N.y * X.z - N.z * X.y, y: N.z * X.x - N.x * X.z, z: N.x * X.y - N.y * X.x };
         const frame: Mat = [X.x, Y.x, N.x, p.x, X.y, Y.y, N.y, p.y, X.z, Y.z, N.z, p.z ?? 0];
+        let hAlign: 'left' | 'center' | 'right' = col === 1 ? 'center' : col === 2 ? 'right' : 'left';
+        let x0 = 0;
+        if (pq && width > 0 && pq !== 'l') {
+          // el cuadro empieza en x = 0, −ancho/2 o −ancho según el punto de inserción
+          const left = col === 0 ? 0 : col === 1 ? -width / 2 : -width;
+          x0 = pq === 'c' ? left + width / 2 : left + width;
+          hAlign = pq === 'c' ? 'center' : 'right';
+        }
         drawText(a, color, mul(m, frame), lines, {
-          x: 0,
+          x: x0,
           y: 0,
           z: 0,
           h,
           rot: 0,
-          wf: 1,
-          hAlign: col === 1 ? 'center' : col === 2 ? 'right' : 'left',
+          wf,
+          hAlign,
           vAlign: row === 0 ? 'top' : row === 1 ? 'middle' : 'bottom',
           lineGap: h * 1.667 * spacing,
         });
@@ -624,6 +1139,7 @@ export function buildPlan(entities: AnyEntity[], blocks: PlanBlocks, insUnits: n
     }
   };
 
+  markPipes(entities);
   for (const e of entities) drawEntity(e, I, '', WHITE, 0);
 
   const out: DxfLayer[] = [...layers.entries()]
@@ -642,6 +1158,109 @@ export function buildPlan(entities: AnyEntity[], blocks: PlanBlocks, insUnits: n
     is3D: Number.isFinite(zMin) && zMax - zMin > 1e-6,
     zRange: Number.isFinite(zMin) ? { min: zMin, max: zMax } : { min: 0, max: 0 },
   };
+}
+
+export interface HatchLine {
+  /** ángulo de la familia de líneas (radianes) */
+  angle: number;
+  base: Pt;
+  /** desplazamiento entre líneas sucesivas */
+  offset: Pt;
+  /** trazos: positivos dibujados, negativos huecos, cero puntos */
+  dashLengths?: number[];
+}
+
+/**
+ * Líneas de un patrón de rayado dentro de los contornos (regla par-impar).
+ * Agrega a `out` los segmentos x1,y1,x2,y2. Limita la cantidad para dibujos enormes.
+ */
+export function hatchPattern(loops: Pt[][], lines: HatchLine[], out: number[]) {
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  const edges: [number, number, number, number][] = [];
+  for (const l of loops)
+    for (let i = 0; i < l.length; i++) {
+      const p = l[i];
+      const q = l[(i + 1) % l.length];
+      edges.push([p.x, p.y, q.x, q.y]);
+      minX = Math.min(minX, p.x);
+      minY = Math.min(minY, p.y);
+      maxX = Math.max(maxX, p.x);
+      maxY = Math.max(maxY, p.y);
+    }
+  if (!edges.length) return;
+  const MAX_LINES = 4000;
+  const MAX_SEGS = 60000;
+  for (const dl of lines) {
+    const a = Number(dl.angle) || 0;
+    const ux = Math.cos(a);
+    const uy = Math.sin(a);
+    const nx = -uy;
+    const ny = ux;
+    const o = dl.offset ?? { x: 0, y: 0 };
+    const d = o.x * nx + o.y * ny; // separación perpendicular
+    if (!(Math.abs(d) > 1e-9)) continue;
+    const shift = o.x * ux + o.y * uy; // corrimiento a lo largo de la línea
+    const b = dl.base ?? { x: 0, y: 0 };
+    const bn = b.x * nx + b.y * ny;
+    const corners = [[minX, minY], [maxX, minY], [minX, maxY], [maxX, maxY]].map(([x, y]) => x * nx + y * ny);
+    const nMin = Math.min(...corners);
+    const nMax = Math.max(...corners);
+    let k0 = Math.ceil((nMin - bn) / d);
+    let k1 = Math.floor((nMax - bn) / d);
+    if (k0 > k1) [k0, k1] = [k1, k0];
+    if (k1 - k0 > MAX_LINES) continue; // demasiado denso para verlo: se omite esta familia
+    const dashes = (dl.dashLengths ?? []).filter((v) => Number.isFinite(v));
+    const period = dashes.reduce((s, v) => s + Math.abs(v), 0);
+    for (let k = k0; k <= k1; k++) {
+      // punto de la línea k y su parámetro de inicio del patrón
+      const px = b.x + k * o.x;
+      const py = b.y + k * o.y;
+      const ts: number[] = [];
+      for (const [x1, y1, x2, y2] of edges) {
+        // intersección de la recta (px,py)+t·u con el borde
+        const ex = x2 - x1;
+        const ey = y2 - y1;
+        const den = ux * ey - uy * ex;
+        if (Math.abs(den) < 1e-12) continue;
+        const wx = x1 - px;
+        const wy = y1 - py;
+        const t = (wx * ey - wy * ex) / den;
+        const sEdge = (wx * uy - wy * ux) / den;
+        if (sEdge >= 0 && sEdge < 1) ts.push(t);
+      }
+      ts.sort((p, q) => p - q);
+      for (let i = 0; i + 1 < ts.length; i += 2) {
+        const t0 = ts[i];
+        const t1 = ts[i + 1];
+        if (!dashes.length || !(period > 1e-12)) {
+          out.push(px + ux * t0, py + uy * t0, px + ux * t1, py + uy * t1);
+          continue;
+        }
+        // trazos: el patrón empieza en el punto base de la línea, corrido k·shift
+        const phase0 = k * shift;
+        let t = Math.floor((t0 - phase0) / period) * period + phase0;
+        let guard = 0;
+        while (t < t1 && guard++ < 2000) {
+          for (const dv of dashes) {
+            const len = Math.abs(dv);
+            const s0 = t;
+            const s1 = t + (dv === 0 ? period * 0.002 : len);
+            if (dv >= 0) {
+              const c0 = Math.max(s0, t0);
+              const c1 = Math.min(s1, t1);
+              if (c1 > c0) out.push(px + ux * c0, py + uy * c0, px + ux * c1, py + uy * c1);
+            }
+            t += len;
+            if (t >= t1) break;
+          }
+        }
+        if (out.length / 4 > MAX_SEGS * lines.length) return;
+      }
+    }
+  }
 }
 
 /** Contornos de un sombreado (polilíneas o bordes de líneas y arcos) en coordenadas del objeto */

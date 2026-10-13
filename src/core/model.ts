@@ -197,6 +197,10 @@ export interface Underlay {
   unitsNote?: string;
   /** DXF/DWG: dibujar en un solo color en vez de los colores del archivo */
   monochrome?: boolean;
+  /** DXF/DWG: presentación (hoja de impresión) que se muestra; vacío = espacio modelo */
+  layout?: string;
+  /** escala y posición guardadas de cada vista ('' = modelo) para volver a ellas */
+  viewPlacements?: Record<string, { scale: number; x: number; y: number; calibrated: boolean }>;
 }
 
 /** DXF y DWG son dibujos de líneas (capas, ajuste del cursor); PDF e imagen son fotos */

@@ -5,13 +5,14 @@
  * (@mlightcad/libredwg-web). Aquí solo se traduce su base de datos a la misma forma que usa el
  * lector de DXF, así el resto del programa trata igual un DWG que un DXF.
  */
-import { buildPlan, type AnyEntity, type DxfResult, type LayerTable, type PlanBlocks } from './dxf';
+import { buildPlan, makeLayout, readViewport, type AnyEntity, type DxfResult, type LayerTable, type PlanBlocks, type PlanLayout, type RawViewport, type TextStyles } from './dxf';
 
 type P = { x: number; y: number; z?: number };
 // Forma mínima de la base de datos que entrega libredwg-web (se lee de forma defensiva)
 type DwgEnt = Record<string, unknown> & { type: string; layer?: string; isVisible?: boolean; handle?: string };
 interface DwgBlockRecord {
   name: string;
+  handle?: string;
   basePoint?: P;
   entities?: DwgEnt[];
 }
@@ -20,8 +21,10 @@ export interface DwgDatabaseLike {
   entities?: DwgEnt[];
   tables?: {
     BLOCK_RECORD?: { entries?: DwgBlockRecord[] };
-    LAYER?: { entries?: { name: string; colorIndex?: number; color?: number; off?: boolean; frozen?: boolean }[] };
+    LAYER?: { entries?: { name: string; handle?: string; colorIndex?: number; color?: number; off?: boolean; frozen?: boolean }[] };
+    STYLE?: { entries?: { name: string; font?: string; widthFactor?: number }[] };
   };
+  objects?: { LAYOUT?: { layoutName?: string; paperSpaceTableId?: string; tabOrder?: number }[] };
 }
 
 const deg = (rad: unknown) => ((Number(rad) || 0) * 180) / Math.PI;
@@ -44,6 +47,7 @@ function attribEntity(at: DwgEnt): AnyEntity | null {
     halign: t.halign,
     valign: t.valign,
     xScale: t.xScale,
+    styleName: t.styleName,
     extrusion: t.extrusionDirection,
   };
 }
@@ -100,7 +104,16 @@ function toPlanEntity(e: DwgEnt): AnyEntity | null {
     case '3DFACE':
       return { ...base, points: [e.corner1, e.corner2, e.corner3, e.corner4 ?? e.corner3].filter(Boolean) };
     case 'HATCH':
-      return { ...base, boundaryPaths: e.boundaryPaths, solidFill: e.solidFill, patternName: e.patternName, elevation: e.elevation ?? (e.elevationPoint as P | undefined)?.z };
+      return {
+        ...base,
+        boundaryPaths: e.boundaryPaths,
+        solidFill: e.solidFill,
+        patternName: e.patternName,
+        definitionLines: e.definitionLines,
+        elevation: e.elevation ?? (e.elevationPoint as P | undefined)?.z,
+      };
+    case 'MULTILEADER':
+      return { ...e, ...base };
     case 'INSERT':
       return {
         ...base,
@@ -132,6 +145,7 @@ function toPlanEntity(e: DwgEnt): AnyEntity | null {
         halign: e.halign,
         valign: e.valign,
         xScale: e.xScale,
+        styleName: e.styleName,
       };
     case 'MTEXT':
       return {
@@ -144,6 +158,8 @@ function toPlanEntity(e: DwgEnt): AnyEntity | null {
         direction: e.direction,
         rotation: deg(e.rotation),
         lineSpacing: e.lineSpacing,
+        styleName: e.styleName,
+        extentsWidth: e.extentsWidth,
       };
     default:
       // sombreados con patrón, imágenes, etc.: el lector los cuenta y no los dibuja
@@ -156,13 +172,17 @@ export function planFromDwgDatabase(db: DwgDatabaseLike): DxfResult {
   const records = db.tables?.BLOCK_RECORD?.entries ?? [];
   const blocks: PlanBlocks = {};
   let model: DwgEnt[] | undefined;
+  const paper: DwgBlockRecord[] = [];
   for (const b of records) {
     const name = b.name ?? '';
     if (/^\*model_space$/i.test(name)) {
       model = b.entities;
       continue;
     }
-    if (/^\*paper_space/i.test(name)) continue;
+    if (/^\*paper_space/i.test(name)) {
+      paper.push(b);
+      continue;
+    }
     blocks[name] = {
       position: b.basePoint ?? { x: 0, y: 0 },
       entities: (b.entities ?? []).map(toPlanEntity).filter((x): x is AnyEntity => !!x),
@@ -172,6 +192,31 @@ export function planFromDwgDatabase(db: DwgDatabaseLike): DxfResult {
   const source = model && model.length ? model : (db.entities ?? []).filter((e) => e.type !== 'VIEWPORT');
   const entities = source.map(toPlanEntity).filter((x): x is AnyEntity => !!x);
   const table: LayerTable = {};
-  for (const l of db.tables?.LAYER?.entries ?? []) table[l.name] = { colorIndex: l.colorIndex, color: l.color, off: !!l.off || !!l.frozen };
-  return buildPlan(entities, blocks, Number(db.header?.INSUNITS ?? 0) || 0, 'DWG', table);
+  const byHandle = new Map<string, string>();
+  for (const l of db.tables?.LAYER?.entries ?? []) {
+    table[l.name] = { colorIndex: l.colorIndex, color: l.color, off: !!l.off || !!l.frozen };
+    if (l.handle) byHandle.set(String(l.handle).toUpperCase(), l.name);
+  }
+  const styles: TextStyles = {};
+  for (const st of db.tables?.STYLE?.entries ?? []) if (st.name) styles[st.name] = { widthFactor: st.widthFactor, font: st.font };
+  const insUnits = Number(db.header?.INSUNITS ?? 0) || 0;
+  const plan = buildPlan(entities, blocks, insUnits, 'DWG', table, styles);
+
+  // presentaciones (espacio papel): su dibujo propio y sus ventanas al modelo
+  const layoutsMeta = db.objects?.LAYOUT ?? [];
+  const layouts: PlanLayout[] = [];
+  for (const rec of paper) {
+    const meta = layoutsMeta.find((l) => rec.handle && String(l.paperSpaceTableId ?? '').toUpperCase() === String(rec.handle).toUpperCase());
+    const ents = rec.entities ?? [];
+    const vps = ents
+      .filter((e) => e.type === 'VIEWPORT')
+      .map((e) => readViewport(e as unknown as AnyEntity, byHandle))
+      .filter((v): v is RawViewport => !!v);
+    const paperEnts = ents.filter((e) => e.type !== 'VIEWPORT').map(toPlanEntity).filter((x): x is AnyEntity => !!x);
+    const lay = makeLayout(meta?.layoutName || `Presentación ${layouts.length + 1}`, meta?.tabOrder ?? layouts.length + 1, paperEnts, vps, blocks, insUnits, 'DWG', table, styles);
+    if (lay) layouts.push(lay);
+  }
+  layouts.sort((x, y) => x.order - y.order);
+  if (layouts.length) plan.layouts = layouts;
+  return plan;
 }

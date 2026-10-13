@@ -55,7 +55,7 @@ import { planHooks } from './planPanel';
 import { buildFabricationSheet, fabricationHooks } from './fabrication';
 import { initPanels, togglePanel, toggleAllPanels } from './panels';
 import { selectionFrom, store, toggleInSelection, type ColorMode, type LabelMode, type Tool } from './state';
-import { createUnderlay, loadAsset, pickPlanFile, setMaxTexture, type UnderlayAsset } from './underlay';
+import { createUnderlay, loadAsset, pickPlanFile, setMaxTexture, switchPlanView, viewAsset, type UnderlayAsset } from './underlay';
 import { Viewer, type ViewName } from './viewer3d';
 
 const $ = (id: string) => document.getElementById(id)!;
@@ -1056,17 +1056,17 @@ function syncUnderlay() {
   }
   const key = underlayKey(u);
   if (key === currentAssetKey && currentAsset) {
-    viewer.setUnderlay(u, currentAsset);
+    viewer.setUnderlay(u, viewAsset(u, currentAsset));
     return;
   }
-  if (currentAsset) viewer.setUnderlay(u, currentAsset); // mientras se lee la nueva página
+  if (currentAsset) viewer.setUnderlay(u, viewAsset(u, currentAsset)); // mientras se lee la nueva página
   currentAssetKey = key;
   loadAsset(u, data)
     .then((asset) => {
       if (currentAssetKey !== key) return;
       currentAsset = asset;
       const now = store.project.underlay;
-      viewer.setUnderlay(now, asset);
+      viewer.setUnderlay(now, now ? viewAsset(now, asset) : undefined);
       renderLeft($('left'));
     })
     .catch((err) => flash(`No se pudo leer el plano: ${(err as Error).message}`));
@@ -1131,7 +1131,23 @@ function applyCalibration(measured: number, real: number) {
   setTool('select');
 }
 
-planHooks.asset = () => (store.project.underlay && currentAssetKey === underlayKey(store.project.underlay) ? currentAsset : undefined);
+planHooks.asset = () => {
+  const u = store.project.underlay;
+  return u && currentAsset && currentAssetKey === underlayKey(u) ? viewAsset(u, currentAsset) : undefined;
+};
+planHooks.layouts = () => {
+  const u = store.project.underlay;
+  return u && currentAsset && currentAssetKey === underlayKey(u) ? currentAsset.dxf?.layouts?.map((l) => l.name) ?? [] : [];
+};
+planHooks.showLayout = (name: string) => {
+  const asset = currentAsset;
+  if (!asset) return;
+  store.mutate((p) => {
+    if (p.underlay) switchPlanView(p.underlay, asset, name);
+  });
+  setView('top');
+  flash(name ? `Presentación «${name}»` : 'Espacio modelo');
+};
 planHooks.load = async (given?: File) => {
   const file = given ?? (await pickPlanFile());
   if (!file) return;

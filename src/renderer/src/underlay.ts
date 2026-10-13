@@ -3,7 +3,7 @@
  */
 import * as pdfjs from 'pdfjs-dist';
 import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
-import { INSUNITS_FT, isVectorPlan, parseDxf, plausibleScale, planFromDwgDatabase, type AttachedData, type DwgDatabaseLike, type DxfResult, type Underlay } from '../../core';
+import { INSUNITS_FT, isVectorPlan, layoutPlan, parseDxf, plausibleScale, planFromDwgDatabase, type AttachedData, type DwgDatabaseLike, type DxfResult, type Underlay } from '../../core';
 
 pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
 
@@ -156,6 +156,79 @@ function toCanvas(w: number, h: number, draw: (ctx: CanvasRenderingContext2D) =>
   }
   draw(ctx);
   return c;
+}
+
+// ---------- presentaciones (hojas de impresión) ----------
+const layoutCache = new WeakMap<UnderlayAsset, Map<string, UnderlayAsset>>();
+
+/** Lo que se dibuja: el modelo, o la presentación elegida armada con sus ventanas */
+export function viewAsset(u: Underlay, asset: UnderlayAsset): UnderlayAsset {
+  const d = asset.dxf;
+  if (!u.layout || !d?.layouts?.length) return asset;
+  const lay = d.layouts.find((l) => l.name === u.layout);
+  if (!lay) return asset;
+  let per = layoutCache.get(asset);
+  if (!per) layoutCache.set(asset, (per = new Map()));
+  let out = per.get(lay.name);
+  if (!out) {
+    const plan = layoutPlan(d, lay);
+    plan.layouts = d.layouts;
+    const b = plan.bounds;
+    out = { kind: 'dxf', dxf: plan, width: b.maxX - b.minX, height: b.maxY - b.minY };
+    per.set(lay.name, out);
+  }
+  return out;
+}
+
+/** Tamaño de la hoja en milímetros o pulgadas, según lo que parezca (A1 = 841 mm, ARCH D = 36 in) */
+export function paperSize(b: { minX: number; minY: number; maxX: number; maxY: number }): string {
+  const w = b.maxX - b.minX;
+  const h = b.maxY - b.minY;
+  const span = Math.max(w, h);
+  const f = (v: number) => Math.round(v).toLocaleString('es-CO');
+  if (span >= 120 && span <= 2500) return `${f(w)} × ${f(h)} mm`;
+  if (span >= 6 && span <= 100) return `${f(w)} × ${f(h)} in`;
+  return `${f(w)} × ${f(h)}`;
+}
+
+/**
+ * Cambia la vista del plano entre el modelo ('') y una presentación. Guarda la escala y posición
+ * de la vista que se deja y recupera (o propone) las de la nueva. Modifica `u`.
+ */
+export function switchPlanView(u: Underlay, asset: UnderlayAsset, name: string) {
+  const cur = u.layout ?? '';
+  if (cur === name) return;
+  if (name && !asset.dxf?.layouts?.some((l) => l.name === name)) return;
+  const views = (u.viewPlacements ??= {});
+  const fromBounds = viewAsset(u, asset).dxf?.bounds;
+  views[cur] = { scale: u.scale, x: u.x, y: u.y, calibrated: u.calibrated };
+  if (name) u.layout = name;
+  else delete u.layout;
+  const saved = views[name];
+  if (saved) {
+    u.scale = saved.scale;
+    u.x = saved.x;
+    u.y = saved.y;
+    u.calibrated = saved.calibrated;
+    return;
+  }
+  const b = viewAsset(u, asset).dxf?.bounds;
+  if (!b || !fromBounds) return;
+  // la esquina inferior izquierda de la hoja queda donde estaba la del dibujo anterior
+  const r = (u.rotation * Math.PI) / 180;
+  const rot = (x: number, y: number) => [x * Math.cos(r) - y * Math.sin(r), x * Math.sin(r) + y * Math.cos(r)];
+  const [ax, ay] = rot(fromBounds.minX * u.scale, fromBounds.minY * u.scale);
+  const wx = u.x + ax;
+  const wy = u.y + ay;
+  // la hoja se muestra del mismo ancho que tenía el dibujo, para verla sin tener que buscarla
+  const fromSpan = Math.max(fromBounds.maxX - fromBounds.minX, fromBounds.maxY - fromBounds.minY) * u.scale;
+  const span = Math.max(b.maxX - b.minX, b.maxY - b.minY);
+  const s = span > 0 && fromSpan > 0 ? fromSpan / span : u.scale;
+  const [bx, by] = rot(b.minX * s, b.minY * s);
+  u.scale = s;
+  u.x = wx - bx;
+  u.y = wy - by;
+  u.calibrated = true;
 }
 
 // ---------- archivo nuevo ----------

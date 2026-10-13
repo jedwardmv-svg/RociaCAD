@@ -5,7 +5,7 @@ import { fmt, INSUNITS_FT, isVectorPlan, type Underlay } from '../../core';
 import { h } from './dom';
 import { numField } from './fields';
 import { store } from './state';
-import { pdfScaleFt, pdfScaleN, type UnderlayAsset } from './underlay';
+import { paperSize, pdfScaleFt, pdfScaleN, type UnderlayAsset } from './underlay';
 
 /** Acciones que provee main.ts (abren diálogos o cambian de herramienta) */
 export const planHooks = {
@@ -14,6 +14,10 @@ export const planHooks = {
   move: () => {},
   remove: () => {},
   asset: (): UnderlayAsset | undefined => undefined,
+  /** nombres de las presentaciones (hojas de impresión) del DWG/DXF */
+  layouts: (): string[] => [],
+  /** muestra una presentación ('' = espacio modelo) */
+  showLayout: (_name: string) => {},
 };
 
 let layersOpen = false;
@@ -119,6 +123,25 @@ export function planSection(): HTMLElement {
     pageField = h('div', { class: 'field select' }, h('span', null, 'Página'), sel);
   }
 
+  // espacio modelo o una de las presentaciones (rótulo, tablas, vistas a escala)
+  let viewField: HTMLElement | null = null;
+  const layoutNames = isVectorPlan(u.kind) ? planHooks.layouts() : [];
+  if (layoutNames.length) {
+    const sel = h(
+      'select',
+      { 'data-key': 'plan-layout', 'aria-label': 'Vista del plano' },
+      h('option', { value: '', selected: !u.layout }, 'Modelo'),
+      layoutNames.map((n) => h('option', { value: n, selected: u.layout === n }, n)),
+    );
+    sel.addEventListener('change', () => planHooks.showLayout(sel.value));
+    viewField = h(
+      'div',
+      { class: 'field select', title: 'Modelo: el dibujo a escala real para diseñar encima. Presentaciones: las hojas de impresión con rótulo y tablas.' },
+      h('span', null, 'Vista'),
+      sel,
+    );
+  }
+
   let layers: HTMLElement | null = null;
   if (isVectorPlan(u.kind) && asset?.dxf) {
     const hidden = new Set(u.hiddenLayers ?? []);
@@ -169,12 +192,17 @@ export function planSection(): HTMLElement {
               `El dibujo trae objetos en 3D (alturas de ${fmt('elevation', d3.zRange.min * u.scale, units, true)} a ${fmt('elevation', d3.zRange.max * u.scale, units, true)}): véalos en la vista 3D.`,
             )
           : null,
-        (d3.stats.skipped.HATCH ?? 0) > 0 ? h('p', { class: 'muted-text' }, `${d3.stats.skipped.HATCH} sombreados con patrón no se muestran (los rellenos sólidos sí).`) : null,
+        u.layout
+          ? h('p', { class: 'notice' }, 'Está viendo una hoja de impresión, no el dibujo a escala real. Para diseñar la red vuelva a la vista Modelo.')
+          : null,
+        (d3.stats.skipped.HATCH ?? 0) > 0 ? h('p', { class: 'muted-text' }, `${d3.stats.skipped.HATCH} sombreados sin patrón conocido no se muestran.`) : null,
       ]
     : null;
   // tamaño del dibujo con la escala actual, para ver de un vistazo si las unidades están bien
   const b = isVectorPlan(u.kind) ? asset?.dxf?.bounds : undefined;
-  const sizeRow = b
+  const sizeRow = b && u.layout
+    ? [h('dt', null, 'Hoja'), h('dd', null, paperSize(b))]
+    : b
     ? [h('dt', null, 'Tamaño'), h('dd', null, `${fmt('length', (b.maxX - b.minX) * u.scale, units, true)} × ${fmt('length', (b.maxY - b.minY) * u.scale, units, true)}`)]
     : null;
 
@@ -195,7 +223,8 @@ export function planSection(): HTMLElement {
       h('button', { class: 'btn outline small', onclick: () => planHooks.move() }, 'Mover plano'),
     ),
     h('div', { style: 'height:6px' }),
-    scaleField,
+    viewField,
+    u.layout ? null : scaleField,
     pageField,
     numField({ label: 'Giro', unit: '°', value: u.rotation, digits: 2, key: 'plan-rot', onCommit: (v) => setU((x) => (x.rotation = v)) }),
     numField({ label: 'Elevación', q: 'elevation', value: u.z, key: 'plan-z', onCommit: (v) => setU((x) => (x.z = v)) }),
