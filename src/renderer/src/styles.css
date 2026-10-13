@@ -62,15 +62,87 @@ textarea {
 }
 
 #app {
+  --left-w: 310px;
+  --insp-w: 300px;
+  --bottom-h: 270px;
   height: 100vh;
   display: grid;
-  grid-template-columns: 310px minmax(0, 1fr) 300px;
-  grid-template-rows: 46px minmax(0, 1fr) var(--bottom-h, 270px) 26px;
+  grid-template-columns: var(--left-w) minmax(0, 1fr) var(--insp-w);
+  grid-template-rows: 46px minmax(0, 1fr) var(--bottom-h) 26px;
   grid-template-areas:
     'tb tb tb'
     'left stage insp'
     'left bottom bottom'
     'st st st';
+}
+
+/* ---------- Paneles que se ocultan ---------- */
+#app.left-hidden {
+  --left-w: 0px;
+}
+#app.insp-hidden {
+  --insp-w: 0px;
+}
+#app.bottom-hidden {
+  --bottom-h: 0px;
+}
+#app.left-hidden #left,
+#app.insp-hidden #inspector,
+#app.bottom-hidden #bottom {
+  display: none;
+}
+/* sin el panel izquierdo, las tablas ocupan todo el ancho */
+#app.left-hidden {
+  grid-template-areas:
+    'tb tb tb'
+    'left stage insp'
+    'bottom bottom bottom'
+    'st st st';
+}
+
+.panel-toggle {
+  position: absolute;
+  z-index: 4;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  background: rgba(20, 28, 35, 0.86);
+  color: #e8edf1;
+  cursor: pointer;
+}
+.panel-toggle:hover {
+  background: rgba(36, 48, 58, 0.96);
+}
+.panel-toggle svg {
+  width: 14px;
+  height: 14px;
+}
+.panel-toggle.left,
+.panel-toggle.insp {
+  top: 50%;
+  width: 18px;
+  height: 52px;
+  transform: translateY(-50%);
+}
+.panel-toggle.left {
+  left: 0;
+  border-left: 0;
+  border-radius: 0 6px 6px 0;
+}
+.panel-toggle.insp {
+  right: 0;
+  border-right: 0;
+  border-radius: 6px 0 0 6px;
+}
+.panel-toggle.bottom {
+  left: 50%;
+  bottom: 0;
+  width: 52px;
+  height: 18px;
+  transform: translateX(-50%);
+  border-bottom: 0;
+  border-radius: 6px 6px 0 0;
 }
 
 /* ---------- Barra superior ---------- */

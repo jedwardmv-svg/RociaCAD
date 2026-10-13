@@ -52,6 +52,7 @@ import { editHooks, renderInspector } from './inspector';
 import { designHooks, renderLeft } from './leftPanel';
 import { buildReport } from './report';
 import { planHooks } from './planPanel';
+import { initPanels, togglePanel, toggleAllPanels } from './panels';
 import { selectionFrom, store, toggleInSelection, type ColorMode, type LabelMode, type Tool } from './state';
 import { createUnderlay, loadAsset, pickPlanFile, setMaxTexture, type UnderlayAsset } from './underlay';
 import { Viewer, type ViewName } from './viewer3d';
@@ -1373,6 +1374,14 @@ desktop?.onMenu(async (action) => {
       return planHooks.load();
     case 'catalog':
       return openCatalog();
+    case 'panel-left':
+      return togglePanel('left');
+    case 'panel-insp':
+      return togglePanel('insp');
+    case 'panel-bottom':
+      return togglePanel('bottom');
+    case 'panel-all':
+      return toggleAllPanels();
     case 'export-dxf':
       return actions.exportDxf();
     case 'example-tree':
@@ -1420,6 +1429,10 @@ window.addEventListener('keydown', (e) => {
       renderHint();
     } else if (store.tool !== 'select') setTool('select');
     else store.select(null);
+  } else if (!desktop && mod && ['1', '2', '3', '4'].includes(e.key)) {
+    e.preventDefault();
+    if (e.key === '4') toggleAllPanels();
+    else togglePanel(e.key === '1' ? 'left' : e.key === '2' ? 'insp' : 'bottom');
   } else if (!desktop && mod && e.key.toLowerCase() === 'a') {
     e.preventDefault();
     selectAll();
@@ -1510,6 +1523,7 @@ async function start() {
   } catch {
     /* sin WebGL */
   }
+  initPanels($('stage'));
   // la app abre con un proyecto en blanco; los ejemplos están en Archivo → Ejemplos
   store.load(emptyProject());
   // Acceso para pruebas automáticas (solo si se abre con #debug)
