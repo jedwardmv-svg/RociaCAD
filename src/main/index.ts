@@ -116,7 +116,7 @@ function buildMenu() {
         { role: 'cut', label: 'Cortar' },
         { role: 'copy', label: 'Copiar' },
         { role: 'paste', label: 'Pegar' },
-        { role: 'selectAll', label: 'Seleccionar todo' },
+        item('Seleccionar todo', 'select-all', 'CmdOrCtrl+A'),
         { type: 'separator' },
         item('Catálogo de tuberías, rociadores y elementos…', 'catalog', 'CmdOrCtrl+K'),
       ],

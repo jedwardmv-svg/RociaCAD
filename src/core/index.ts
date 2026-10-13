@@ -16,3 +16,4 @@ export * from './dwg';
 export * from './autoFittings';
 export * from './sizing';
 export * from './layout';
+export * from './multiEdit';

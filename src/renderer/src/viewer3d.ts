@@ -612,9 +612,19 @@ export class Viewer {
   applySelection(sel: Selection) {
     for (const [mesh, m] of this.baseMaterial) mesh.material = m;
     if (!sel) return;
-    for (const mesh of this.meshById.get(`${sel.kind}:${sel.id}`) ?? []) {
-      if (this.baseMaterial.has(mesh)) mesh.material = this.selectedMat;
-    }
+    const keys =
+      sel.kind === 'multi'
+        ? [
+            ...sel.items.nodes.map((id) => `node:${id}`),
+            ...sel.items.pipes.map((id) => `pipe:${id}`),
+            ...sel.items.sprinklers.map((id) => `sprinkler:${id}`),
+            ...sel.items.elements.map((id) => `element:${id}`),
+          ]
+        : [`${sel.kind}:${sel.id}`];
+    for (const key of keys)
+      for (const mesh of this.meshById.get(key) ?? []) {
+        if (this.baseMaterial.has(mesh)) mesh.material = this.selectedMat;
+      }
   }
 
   /** Objeto bajo el puntero (los rociadores y nodos tienen prioridad sobre los tubos). */

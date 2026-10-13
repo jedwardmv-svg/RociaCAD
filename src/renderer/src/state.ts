@@ -1,16 +1,55 @@
 /**
  * Estado de la aplicación: proyecto, selección, resultados, deshacer/rehacer.
  */
-import { buildBom, calculate, type AttachedData, type Bom, type CalcResult, type Project } from '../../core';
+import { buildBom, calculate, itemCount, type AttachedData, type Bom, type CalcResult, type ItemSet, type Project } from '../../core';
 
 export type Selection =
   | { kind: 'node'; id: string }
   | { kind: 'pipe'; id: string }
   | { kind: 'sprinkler'; id: string }
   | { kind: 'element'; id: string }
+  | { kind: 'multi'; items: ItemSet }
   | null;
 
-export type Tool = 'select' | 'draw' | 'sprinkler' | 'fill' | 'element' | 'calibrate' | 'move-plan';
+type SingleKind = 'node' | 'pipe' | 'sprinkler' | 'element';
+const LIST: Record<SingleKind, keyof ItemSet> = { node: 'nodes', pipe: 'pipes', sprinkler: 'sprinklers', element: 'elements' };
+
+/** Los objetos de la selección como conjunto (vacío si no hay nada) */
+export function selectionItems(sel: Selection): ItemSet {
+  const out: ItemSet = { nodes: [], pipes: [], sprinklers: [], elements: [] };
+  if (!sel) return out;
+  if (sel.kind === 'multi') return { nodes: [...sel.items.nodes], pipes: [...sel.items.pipes], sprinklers: [...sel.items.sprinklers], elements: [...sel.items.elements] };
+  out[LIST[sel.kind]].push(sel.id);
+  return out;
+}
+
+/** Selección a partir de un conjunto: nada, un objeto o varios */
+export function selectionFrom(items: ItemSet): Selection {
+  const n = itemCount(items);
+  if (!n) return null;
+  if (n === 1) {
+    for (const k of Object.keys(LIST) as SingleKind[]) if (items[LIST[k]].length) return { kind: k, id: items[LIST[k]][0] } as Selection;
+  }
+  return { kind: 'multi', items };
+}
+
+/** Agrega o quita un objeto de la selección */
+export function toggleInSelection(sel: Selection, kind: SingleKind, id: string): Selection {
+  const items = selectionItems(sel);
+  const list = items[LIST[kind]];
+  const i = list.indexOf(id);
+  if (i >= 0) list.splice(i, 1);
+  else list.push(id);
+  return selectionFrom(items);
+}
+
+export function isSelected(sel: Selection, kind: string, id: string): boolean {
+  if (!sel) return false;
+  if (sel.kind === 'multi') return (sel.items[LIST[kind as SingleKind]] ?? []).includes(id);
+  return sel.kind === kind && sel.id === id;
+}
+
+export type Tool = 'select' | 'draw' | 'sprinkler' | 'fill' | 'element' | 'calibrate' | 'move-plan' | 'pick-vector';
 
 export type ColorMode = 'material' | 'size' | 'pressure' | 'velocity';
 
@@ -134,12 +173,31 @@ class Store {
     const s = this.selection;
     if (!s) return;
     const p = this.project;
+    if (s.kind === 'multi') {
+      const has = (list: { id: string }[]) => new Set(list.map((x) => x.id));
+      const nodes = has(p.nodes);
+      const pipes = has(p.pipes);
+      const spk = has(p.sprinklers);
+      const els = has(p.elements ?? []);
+      this.selection = selectionFrom({
+        nodes: s.items.nodes.filter((id) => nodes.has(id)),
+        pipes: s.items.pipes.filter((id) => pipes.has(id)),
+        sprinklers: s.items.sprinklers.filter((id) => spk.has(id)),
+        elements: s.items.elements.filter((id) => els.has(id)),
+      });
+      return;
+    }
     const exists =
       (s.kind === 'node' && p.nodes.some((n) => n.id === s.id)) ||
       (s.kind === 'pipe' && p.pipes.some((n) => n.id === s.id)) ||
       (s.kind === 'sprinkler' && p.sprinklers.some((n) => n.id === s.id)) ||
       (s.kind === 'element' && (p.elements ?? []).some((n) => n.id === s.id));
     if (!exists) this.selection = null;
+  }
+
+  /** Después de un cambio hecho desde fuera (p. ej. borrar varios), quitar de la selección lo que ya no existe */
+  cleanSelection() {
+    this.fixSelection();
   }
 
   private afterChange() {

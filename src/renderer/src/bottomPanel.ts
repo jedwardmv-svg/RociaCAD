@@ -4,7 +4,7 @@
 import { fmt, getMaterial, internalDiameter, ORIENTATION_NAMES, sizeLabel, unitLabel, type BomCategory, type Quantity } from '../../core';
 import { clear, h, parseNum } from './dom';
 import { numInput, rerender } from './fields';
-import { store, type Selection } from './state';
+import { isSelected, store, type Selection } from './state';
 
 type TabId = 'pipes' | 'sprinklers' | 'nodes' | 'bom' | 'messages';
 let tab: TabId = 'pipes';
@@ -63,7 +63,7 @@ function th(label: string, q?: Quantity, left = false) {
 }
 
 function isSel(sel: Selection, kind: string, id: string) {
-  return sel && sel.kind === kind && sel.id === id;
+  return isSelected(sel, kind, id);
 }
 
 function row(kind: 'pipe' | 'node' | 'sprinkler', id: string, cells: (string | HTMLElement)[], cls = '') {

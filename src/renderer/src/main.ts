@@ -11,6 +11,8 @@ import {
   deletePipe,
   deleteSprinkler,
   emptyProject,
+  deleteItems,
+  emptyItems,
   fillRoom,
   getSprinklerModel,
   planGrid,
@@ -43,11 +45,11 @@ import { adoptFromProject, catalogElements, catalogMaterials, catalogSprinklers,
 import { buildDxf } from '../../core';
 import { clear, h } from './dom';
 import { flash, numInput, selectInput } from './fields';
-import { renderInspector } from './inspector';
+import { editHooks, renderInspector } from './inspector';
 import { renderLeft } from './leftPanel';
 import { buildReport } from './report';
 import { planHooks } from './planPanel';
-import { store, type ColorMode, type Tool } from './state';
+import { selectionFrom, store, toggleInSelection, type ColorMode, type Tool } from './state';
 import { createUnderlay, loadAsset, pickPlanFile, setMaxTexture, type UnderlayAsset } from './underlay';
 import { Viewer, type ViewName } from './viewer3d';
 
@@ -253,6 +255,7 @@ function setTool(t: Tool) {
   elementPts = [];
   elementId = null;
   fillStart = null;
+  vector.a = null;
   viewer.setPreview(null, null);
   $('viewport').classList.toggle('drawing', t !== 'select');
   renderToolbar();
@@ -415,6 +418,7 @@ function renderHint() {
         ? 'El cursor se ajusta a los extremos de las líneas del plano. Esc cancela.'
         : 'Acerque la vista y haga clic con precisión en los dos puntos. Esc cancela.',
     'move-plan': 'El destino se ajusta a los nodos del sistema. Esc cancela.',
+    'pick-vector': vector.a ? 'Clic en el punto de destino. Esc cancela.' : 'Clic en el punto base (se ajusta a los nodos y al plano). Esc cancela.',
   };
   $('hint').textContent = hints[store.tool];
 }
@@ -637,6 +641,52 @@ function onElementClick(ev: PointerEvent) {
   renderHint();
 }
 
+// ---------- Tomar un desplazamiento del dibujo (para Repetir y Mover) ----------
+const vector: { a: THREE.Vector3 | null; done: ((dx: number, dy: number, dz: number) => void) | null } = { a: null, done: null };
+
+editHooks.pickVector = (done) => {
+  setTool('pick-vector');
+  vector.done = done;
+};
+
+function vectorTarget(ev: PointerEvent): { point: THREE.Vector3; snapped: boolean } | null {
+  const rect = viewer.renderer.domElement.getBoundingClientRect();
+  for (const n of store.project.nodes) {
+    const sp = viewer.toScreen(new THREE.Vector3(n.x, n.y, n.z));
+    if (Math.hypot(sp.x - (ev.clientX - rect.left), sp.y - (ev.clientY - rect.top)) < 12) return { point: new THREE.Vector3(n.x, n.y, n.z), snapped: true };
+  }
+  const z = vector.a?.z ?? drawElevation;
+  const ps = viewer.underlaySnap(ev);
+  if (ps) return { point: new THREE.Vector3(ps.x, ps.y, z), snapped: true };
+  const p = viewer.planePoint(ev, z);
+  return p ? { point: p, snapped: false } : null;
+}
+
+function onVectorClick(ev: PointerEvent) {
+  const t = vectorTarget(ev);
+  if (!t) return;
+  if (!vector.a) {
+    vector.a = t.point;
+    renderHint();
+    return;
+  }
+  const a = vector.a;
+  const done = vector.done;
+  vector.done = null;
+  setTool('select');
+  done?.(t.point.x - a.x, t.point.y - a.y, t.point.z - a.z);
+}
+
+function onVectorMove(ev: PointerEvent) {
+  const t = vectorTarget(ev);
+  viewer.setPreview(vector.a, t?.point ?? null, !!t?.snapped);
+  if (t && vector.a) {
+    const u = store.project.displayUnits;
+    const d = t.point.clone().sub(vector.a);
+    $('hint').textContent = `X ${fmt('length', d.x, u, true)}, Y ${fmt('length', d.y, u, true)}, Z ${fmt('length', d.z, u, true)}. Esc cancela.`;
+  }
+}
+
 // ---------- Llenar recinto ----------
 let fillStart: THREE.Vector3 | null = null;
 
@@ -785,6 +835,7 @@ canvas.addEventListener('pointerup', (e) => {
     if (store.tool === 'calibrate' || store.tool === 'move-plan') return setTool('select');
     if (store.tool === 'element') return endElement();
     if (store.tool === 'fill') return cancelFill();
+    if (store.tool === 'pick-vector') return setTool('select');
     if (store.tool === 'draw' && drawStart) {
       drawStart = null;
       viewer.setPreview(null, null);
@@ -798,9 +849,96 @@ canvas.addEventListener('pointerup', (e) => {
   if (store.tool === 'sprinkler') return onSprinklerClick(e);
   if (store.tool === 'element') return onElementClick(e);
   if (store.tool === 'fill') return onFillClick(e);
+  if (store.tool === 'pick-vector') return onVectorClick(e);
   const hit = viewer.pick(e);
+  if (e.ctrlKey || e.metaKey) {
+    if (hit) store.select(toggleInSelection(store.selection, hit.kind, hit.id));
+    return;
+  }
   store.select(hit ? { kind: hit.kind, id: hit.id } : null);
 });
+
+// ---------- Selección por ventana (Mayús + arrastrar) ----------
+let box: { x0: number; y0: number; el: HTMLElement; add: boolean } | null = null;
+canvas.addEventListener(
+  'pointerdown',
+  (e) => {
+    if (store.tool !== 'select' || e.button !== 0 || !e.shiftKey) return;
+    e.stopImmediatePropagation();
+    e.preventDefault();
+    canvas.setPointerCapture(e.pointerId);
+    const r = canvas.getBoundingClientRect();
+    const el = h('div', { class: 'select-box' });
+    $('viewport').append(el);
+    box = { x0: e.clientX - r.left, y0: e.clientY - r.top, el, add: e.ctrlKey || e.metaKey };
+    down = null;
+  },
+  { capture: true },
+);
+canvas.addEventListener(
+  'pointermove',
+  (e) => {
+    if (!box) return;
+    e.stopImmediatePropagation();
+    const r = canvas.getBoundingClientRect();
+    const x = e.clientX - r.left;
+    const y = e.clientY - r.top;
+    Object.assign(box.el.style, {
+      left: `${Math.min(x, box.x0)}px`,
+      top: `${Math.min(y, box.y0)}px`,
+      width: `${Math.abs(x - box.x0)}px`,
+      height: `${Math.abs(y - box.y0)}px`,
+    });
+  },
+  { capture: true },
+);
+canvas.addEventListener(
+  'pointerup',
+  (e) => {
+    if (!box) return;
+    e.stopImmediatePropagation();
+    const b = box;
+    box = null;
+    b.el.remove();
+    const r = canvas.getBoundingClientRect();
+    const x1 = e.clientX - r.left;
+    const y1 = e.clientY - r.top;
+    // Mayús + clic sin arrastrar: agrega o quita el objeto
+    if (Math.hypot(x1 - b.x0, y1 - b.y0) < 5) {
+      const hit = viewer.pick(e);
+      if (hit) store.select(toggleInSelection(store.selection, hit.kind, hit.id));
+      return;
+    }
+    const [lx, hx] = [Math.min(b.x0, x1), Math.max(b.x0, x1)];
+    const [ly, hy] = [Math.min(b.y0, y1), Math.max(b.y0, y1)];
+    const inside = (x: number, y: number, z: number) => {
+      const sp = viewer.toScreen(new THREE.Vector3(x, y, z));
+      return sp.x >= lx && sp.x <= hx && sp.y >= ly && sp.y <= hy;
+    };
+    const p = store.project;
+    const inNodes = new Set(p.nodes.filter((n) => inside(n.x, n.y, n.z)).map((n) => n.id));
+    const items = emptyItems();
+    items.nodes = [...inNodes];
+    items.pipes = p.pipes.filter((x) => inNodes.has(x.from) && inNodes.has(x.to)).map((x) => x.id);
+    items.sprinklers = p.sprinklers.filter((x) => inNodes.has(x.nodeId)).map((x) => x.id);
+    items.elements = (p.elements ?? []).filter((el) => el.points.length && el.points.every((q) => inside(q.x, q.y, el.z))).map((el) => el.id);
+    // los nodos que solo son extremos de tubos o soportes de rociadores no hace falta listarlos
+    const covered = new Set<string>();
+    for (const x of p.pipes) if (items.pipes.includes(x.id)) covered.add(x.from).add(x.to);
+    for (const x of p.sprinklers) if (items.sprinklers.includes(x.id)) covered.add(x.nodeId);
+    items.nodes = items.nodes.filter((id) => !covered.has(id));
+    if (b.add) {
+      const cur = store.selection;
+      let sel = cur;
+      for (const id of items.pipes) sel = toggleInSelection(sel, 'pipe', id);
+      for (const id of items.sprinklers) sel = toggleInSelection(sel, 'sprinkler', id);
+      for (const id of items.nodes) sel = toggleInSelection(sel, 'node', id);
+      for (const id of items.elements) sel = toggleInSelection(sel, 'element', id);
+      store.select(sel);
+    } else store.select(selectionFrom(items));
+  },
+  { capture: true },
+);
 canvas.addEventListener('pointermove', (e) => {
   if (e.buttons) return;
   if (store.tool === 'calibrate' || store.tool === 'move-plan') {
@@ -818,6 +956,7 @@ canvas.addEventListener('pointermove', (e) => {
     return;
   }
   if (store.tool === 'fill') return onFillMove(e);
+  if (store.tool === 'pick-vector') return onVectorMove(e);
   if (store.tool !== 'draw') return;
   const t = drawTarget(e);
   viewer.setPreview(drawStart?.point ?? null, t?.point ?? null, !!t?.nodeId || !!t?.pipeId || !!t?.onPlan);
@@ -1117,6 +1256,11 @@ function download(blob: Blob, name: string) {
 function deleteSelection() {
   const s = store.selection;
   if (!s) return;
+  if (s.kind === 'multi') {
+    store.mutate((p) => deleteItems(p, s.items));
+    store.select(null);
+    return;
+  }
   if (s.kind === 'node' && s.id === store.project.supply.nodeId) return flash('El punto de suministro no se puede borrar');
   store.mutate((p) => {
     if (s.kind === 'pipe') deletePipe(p, s.id);
@@ -1128,8 +1272,22 @@ function deleteSelection() {
 }
 
 // ---------- Menú y teclado ----------
+/** Seleccionar todo: el texto si se está escribiendo; si no, todos los objetos */
+function selectAll() {
+  if (isTyping()) return document.execCommand('selectAll');
+  if (store.tool !== 'select') setTool('select');
+  const p = store.project;
+  const items = emptyItems();
+  items.pipes = p.pipes.map((x) => x.id);
+  items.sprinklers = p.sprinklers.map((x) => x.id);
+  items.elements = (p.elements ?? []).map((x) => x.id);
+  store.select(selectionFrom(items));
+}
+
 desktop?.onMenu(async (action) => {
   switch (action) {
+    case 'select-all':
+      return selectAll();
     case 'new':
       return actions.new();
     case 'open':
@@ -1194,6 +1352,9 @@ window.addEventListener('keydown', (e) => {
       renderHint();
     } else if (store.tool !== 'select') setTool('select');
     else store.select(null);
+  } else if (!desktop && mod && e.key.toLowerCase() === 'a') {
+    e.preventDefault();
+    selectAll();
   } else if (e.key === 'Delete' || e.key === 'Backspace') {
     e.preventDefault();
     deleteSelection();

@@ -3,6 +3,14 @@
  */
 import {
   addDropWithSprinkler,
+  closeItems,
+  deleteItems,
+  itemCount,
+  moveItems,
+  repeatItems,
+  setDrops,
+  setPipeSize,
+  type ItemSet,
   autoFittings,
   addSprinkler,
   deleteNode,
@@ -32,8 +40,9 @@ import {
 import { catalogElements, catalogMaterials, catalogSprinklers, findMaterial, findSprinklerModel } from './catalogStore';
 import { openCatalog } from './catalogDialog';
 import { clear, h } from './dom';
-import { numField, numInput, rerender, selectField, selectInput, textField } from './fields';
-import { store } from './state';
+import { flash, numField, numInput, rerender, selectField, selectInput, textField } from './fields';
+import { selectionFrom, store, type Selection } from './state';
+import { runSizing } from './leftPanel';
 
 const icon = {
   trash: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 4.5h10M6.5 4.5V3h3v1.5M4.5 4.5l.7 8.5h5.6l.7-8.5"/></svg>',
@@ -46,6 +55,7 @@ export function renderInspector(el: HTMLElement) {
     if (sel.kind === 'pipe') return clear(el, pipePanel(sel.id));
     if (sel.kind === 'node') return clear(el, nodePanel(sel.id));
     if (sel.kind === 'element') return clear(el, elementPanel(sel.id));
+    if (sel.kind === 'multi') return clear(el, multiPanel(sel.items));
     return clear(el, sprinklerPanel(sel.id));
   });
 }
@@ -424,6 +434,16 @@ function sprinklerPanel(id: string): HTMLElement {
         h(
           'button',
           {
+            class: 'btn outline small',
+            title: `Cuelga el rociador bajo el ramal con un bajante de ${fmt('length', multiForm.drop, u, true)} (o cambia el largo del que tiene)`,
+            onclick: () => store.mutate((p) => setDrops(p, [id], multiForm.drop)),
+          },
+          'Bajante',
+        ),
+        h('button', { class: 'btn outline small', title: 'Quita el bajante: el rociador queda sobre el ramal', onclick: () => store.mutate((p) => setDrops(p, [id], 0)) }, 'Sobre el ramal'),
+        h(
+          'button',
+          {
             class: 'btn outline small danger',
             onclick: () => {
               store.mutate((p) => deleteSprinkler(p, id));
@@ -532,4 +552,232 @@ function elementPanel(id: string): HTMLElement {
       ),
     ),
   );
+}
+
+// ---------- Varios objetos ----------
+
+/** Conexión con la vista: marcar dos puntos en el dibujo para tomar un desplazamiento */
+export const editHooks: { pickVector: (done: (dx: number, dy: number, dz: number) => void) => void } = {
+  pickVector: () => undefined,
+};
+
+const multiForm = { count: 1, dx: 0, dy: 0, dz: 0, mx: 0, my: 0, mz: 0, drop: 0.3 / 0.3048, size: '' as NominalSize | '' };
+
+function multiPanel(items: ItemSet): HTMLElement {
+  const p = store.project;
+  const u = p.displayUnits;
+  const metric = u === 'metric';
+  const f = multiForm;
+  const n = itemCount(items);
+  const parts = [
+    items.pipes.length ? `${items.pipes.length} tubo${items.pipes.length > 1 ? 's' : ''}` : '',
+    items.sprinklers.length ? `${items.sprinklers.length} rociador${items.sprinklers.length > 1 ? 'es' : ''}` : '',
+    items.nodes.length ? `${items.nodes.length} nodo${items.nodes.length > 1 ? 's' : ''}` : '',
+    items.elements.length ? `${items.elements.length} elemento${items.elements.length > 1 ? 's' : ''}` : '',
+  ].filter(Boolean);
+  const vec = (prefix: 'd' | 'm', keyBase: string) =>
+    (['x', 'y', 'z'] as const).map((axis) => {
+      const field = `${prefix}${axis}` as 'dx' | 'dy' | 'dz' | 'mx' | 'my' | 'mz';
+      return numField({
+        label: axis === 'z' ? 'Desplazamiento Z (altura)' : `Desplazamiento ${axis.toUpperCase()}`,
+        q: 'length',
+        value: f[field],
+        key: `${keyBase}-${axis}`,
+        onCommit: (v) => (f[field] = v),
+      });
+    });
+  const pickInto = (target: 'd' | 'm') => () =>
+    editHooks.pickVector((dx, dy, dz) => {
+      if (target === 'd') Object.assign(f, { dx, dy, dz });
+      else Object.assign(f, { mx: dx, my: dy, mz: dz });
+      store.select(store.selection); // volver a pintar el panel
+    });
+
+  const spkIds = closeItems(p, items).sprinklers;
+  const pipeIds = items.pipes;
+  const sizes = [...new Set(p.pipes.filter((x) => pipeIds.includes(x.id)).flatMap((x) => sizesFor(x.material, p)))];
+  if (!f.size || !sizes.includes(f.size)) f.size = sizes.includes('1-1/4') ? '1-1/4' : (sizes[0] ?? '');
+
+  const after = (fn: () => string | void) => {
+    const msg = fn();
+    if (msg) flashMsg(msg);
+  };
+
+  return h(
+    'div',
+    null,
+    h('section', { class: 'section' }, title(`${n} objetos`, parts.join(', '))),
+    h(
+      'section',
+      { class: 'section' },
+      h('h2', null, 'Repetir'),
+      h('p', { class: 'muted-text' }, 'Hace copias en fila. Donde una copia cae sobre un tubo o un nodo de la red, se une sola (por ejemplo, un ramal copiado sobre la matriz).'),
+      numField({ label: 'Copias', value: f.count, key: 'rep-count', min: 1, max: 500, digits: 0, unit: 'und', onCommit: (v) => (f.count = Math.round(v)) }),
+      vec('d', 'rep'),
+      h(
+        'div',
+        { class: 'btn-row' },
+        h('button', { class: 'btn outline small', title: 'Marque dos puntos en el dibujo (se ajustan a los nodos)', onclick: pickInto('d') }, 'Tomar del dibujo'),
+        h(
+          'button',
+          {
+            class: 'btn primary small',
+            onclick: () => {
+              if (Math.hypot(f.dx, f.dy, f.dz) < 1e-6) return flashMsg('Ponga un desplazamiento distinto de cero');
+              let created: ItemSet | undefined;
+              let joined = 0;
+              store.mutate((pp) => {
+                const r = repeatItems(pp, items, f.count, f.dx, f.dy, f.dz);
+                created = r.created;
+                joined = r.joined;
+              });
+              const c = created!;
+              const sel = selectionFrom({ nodes: [], pipes: [...items.pipes, ...c.pipes], sprinklers: [...items.sprinklers, ...c.sprinklers], elements: [...items.elements, ...c.elements] });
+              store.select(sel);
+              flashMsg(`${f.count} copia${f.count > 1 ? 's' : ''} hecha${f.count > 1 ? 's' : ''}${joined ? `; ${joined} unión${joined > 1 ? 'es' : ''} con la red` : ''}.`);
+            },
+          },
+          'Repetir',
+        ),
+      ),
+    ),
+    h(
+      'section',
+      { class: 'section' },
+      h('h2', null, 'Mover'),
+      vec('m', 'mov'),
+      h(
+        'div',
+        { class: 'btn-row' },
+        h('button', { class: 'btn outline small', title: 'Marque dos puntos en el dibujo (se ajustan a los nodos)', onclick: pickInto('m') }, 'Tomar del dibujo'),
+        h(
+          'button',
+          {
+            class: 'btn primary small',
+            onclick: () => {
+              if (Math.hypot(f.mx, f.my, f.mz) < 1e-6) return flashMsg('Ponga un desplazamiento distinto de cero');
+              store.mutate((pp) => moveItems(pp, items, f.mx, f.my, f.mz));
+            },
+          },
+          'Mover',
+        ),
+      ),
+    ),
+    spkIds.length
+      ? h(
+          'section',
+          { class: 'section' },
+          h('h2', null, `Rociadores (${spkIds.length})`),
+          numField({ label: 'Largo del bajante', q: 'length', value: f.drop, key: 'multi-drop', min: 0, onCommit: (v) => (f.drop = v) }),
+          h(
+            'div',
+            { class: 'btn-row' },
+            h(
+              'button',
+              {
+                class: 'btn outline small',
+                title: 'Cuelga cada rociador bajo su ramal con un bajante de 1" (si ya tiene, cambia el largo)',
+                onclick: () =>
+                  after(() => {
+                    let c = 0;
+                    store.mutate((pp) => (c = setDrops(pp, spkIds, f.drop)));
+                    return `${c} rociador${c === 1 ? '' : 'es'} con bajante de ${fmt('length', f.drop, u, true)}`;
+                  }),
+              },
+              'Poner bajantes',
+            ),
+            h(
+              'button',
+              {
+                class: 'btn outline small',
+                onclick: () =>
+                  after(() => {
+                    let c = 0;
+                    store.mutate((pp) => (c = setDrops(pp, spkIds, 0)));
+                    return `${c} rociador${c === 1 ? '' : 'es'} sobre el ramal`;
+                  }),
+              },
+              'Quitar bajantes',
+            ),
+          ),
+          h(
+            'div',
+            { class: 'btn-row' },
+            h('button', { class: 'btn outline small', onclick: () => store.mutate((pp) => pp.sprinklers.forEach((x) => spkIds.includes(x.id) && (x.inDesignArea = true))) }, 'Abrir en el área'),
+            h('button', { class: 'btn outline small', onclick: () => store.mutate((pp) => pp.sprinklers.forEach((x) => spkIds.includes(x.id) && (x.inDesignArea = false))) }, 'Cerrar'),
+          ),
+          selectField<string>(
+            'Modelo',
+            '',
+            [{ value: '', label: 'Cambiar modelo a…' }, ...catalogSprinklers().map((m) => ({ value: m.id, label: m.name }))],
+            'multi-model',
+            (mid) => {
+              const model = findSprinklerModel(mid);
+              if (!model) return;
+              store.mutate((pp) => {
+                putInProjectCatalog(pp, 'sprinklers', model);
+                for (const x of pp.sprinklers) if (spkIds.includes(x.id)) applySprinklerModel(x, model);
+              });
+            },
+          ),
+        )
+      : null,
+    pipeIds.length
+      ? h(
+          'section',
+          { class: 'section' },
+          h('h2', null, `Tubos (${pipeIds.length})`),
+          sizes.length
+            ? h(
+                'div',
+                { class: 'btn-row' },
+                selectInput<NominalSize>('Diámetro', f.size as NominalSize, sizes.map((x) => ({ value: x, label: metric ? `${sizeLabel(x, true)} (${x}")` : `${x}"` })), 'multi-size', (v) => (f.size = v)),
+                h(
+                  'button',
+                  {
+                    class: 'btn outline small',
+                    onclick: () =>
+                      after(() => {
+                        let c = 0;
+                        store.mutate((pp) => (c = setPipeSize(pp, pipeIds, f.size as NominalSize)));
+                        return `${c} tubo${c === 1 ? '' : 's'} cambiado${c === 1 ? '' : 's'}`;
+                      }),
+                  },
+                  'Cambiar diámetro',
+                ),
+              )
+            : null,
+          h(
+            'div',
+            { class: 'btn-row' },
+            h('button', { class: 'btn outline small', title: 'Diámetros mínimos de la tabla de NFPA 13 para estos tubos', onclick: () => runSizing(pipeIds) }, 'Dimensionar por tabla'),
+          ),
+        )
+      : null,
+    h(
+      'section',
+      { class: 'section' },
+      h(
+        'div',
+        { class: 'btn-row' },
+        h(
+          'button',
+          {
+            class: 'btn outline small danger',
+            onclick: () => {
+              store.mutate((pp) => deleteItems(pp, items));
+              store.select(null as Selection);
+            },
+          },
+          'Borrar todo',
+        ),
+        h('button', { class: 'btn outline small', onclick: () => store.select(null) }, 'Quitar selección'),
+      ),
+      h('p', { class: 'muted-text' }, 'Mayús + arrastrar selecciona por ventana; Ctrl + clic agrega o quita un objeto.'),
+    ),
+  );
+}
+
+function flashMsg(msg: string) {
+  flash(msg);
 }

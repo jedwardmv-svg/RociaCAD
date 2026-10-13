@@ -420,6 +420,14 @@ textarea.input-text {
   display: block;
 }
 
+.select-box {
+  position: absolute;
+  pointer-events: none;
+  border: 1px dashed var(--brass);
+  background: color-mix(in srgb, var(--brass) 12%, transparent);
+  z-index: 3;
+}
+
 #viewport.drawing canvas {
   cursor: crosshair;
 }
