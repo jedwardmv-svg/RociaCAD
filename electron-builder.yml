@@ -44,6 +44,9 @@ mac:
   target:
     - target: dmg
       arch: [arm64, x64]
+    # el .zip es el que descarga la app para actualizarse sola
+    - target: zip
+      arch: [arm64, x64]
   category: public.app-category.productivity
   identity: "-"
   hardenedRuntime: false

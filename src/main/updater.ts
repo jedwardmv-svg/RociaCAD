@@ -2,13 +2,15 @@
  * Actualizaciones: busca versiones nuevas publicadas en GitHub y las instala solo con
  * autorización del usuario.
  *
- *  - Windows y Linux: descarga e instala la versión nueva dentro de la app.
- *  - Mac: macOS exige que la app esté firmada con un certificado de Apple para actualizarse
- *    sola; mientras no lo esté, se avisa y se abre la página de descarga.
+ *  - Windows y Linux: descarga e instala con electron-updater.
+ *  - Mac: el actualizador estándar exige un certificado de Apple; sin él, la app descarga el
+ *    .zip de la versión nueva, verifica su huella y se reemplaza a sí misma (ver macUpdate.ts).
+ *    Solo si no puede (por ejemplo, si se abrió desde el disco de instalación) abre la página.
  */
 import { app, BrowserWindow, dialog, shell } from 'electron';
 import { autoUpdater, type UpdateInfo } from 'electron-updater';
 import { readFileSync, writeFileSync } from 'node:fs';
+import { downloadMacUpdate, hasStagedMacUpdate, launchMacSwap, macSelfUpdateProblem, takeMacUpdateFailure } from './macUpdate';
 import { join } from 'node:path';
 
 const RELEASES_URL = 'https://github.com/jedwardmv-svg/RociaCAD/releases/latest';
@@ -49,9 +51,21 @@ let restartAfterClose = false;
 export function installIfRequested(): boolean {
   if (!restartAfterClose) return false;
   restartAfterClose = false;
+  if (isMac) {
+    installOnQuitMac = false;
+    if (launchMacSwap(true)) {
+      app.quit();
+      return true;
+    }
+    return false;
+  }
   autoUpdater.quitAndInstall(false, true);
   return true;
 }
+
+const isMac = process.platform === 'darwin';
+/** Mac: el usuario eligió "Instalar al cerrar" */
+let installOnQuitMac = false;
 
 function send(text: string) {
   getWin()?.webContents.send('update-status', text);
@@ -91,6 +105,33 @@ export function initUpdater(windowGetter: () => BrowserWindow | null) {
     }
   });
 
+  // avisar si la actualización anterior no se pudo instalar
+  if (isMac) {
+    const failed = takeMacUpdateFailure();
+    if (failed) {
+      setTimeout(async () => {
+        const opts = {
+          type: 'warning' as const,
+          message: 'La actualización no se pudo instalar.',
+          detail:
+            `${failed}\n\nSi macOS lo bloqueó, abra Configuración del Sistema → Privacidad y seguridad → Gestión de apps, ` +
+            'active RociaCAD e intente de nuevo desde Ayuda → Buscar actualizaciones. También puede instalarla desde la página de descarga.',
+          buttons: ['Abrir la página de descarga', 'Cerrar'],
+          defaultId: 1,
+          cancelId: 1,
+          noLink: true,
+        };
+        const w = getWin();
+        const r = w ? await dialog.showMessageBox(w, opts) : await dialog.showMessageBox(opts);
+        if (r.response === 0) void shell.openExternal(RELEASES_URL);
+      }, 2500);
+    }
+  }
+
+  app.on('will-quit', () => {
+    if (isMac && installOnQuitMac && hasStagedMacUpdate()) launchMacSwap(false);
+  });
+
   if (app.isPackaged && loadSettings().checkOnStart) {
     setTimeout(() => checkForUpdates(false), 6000);
   }
@@ -121,9 +162,10 @@ async function onAvailable(info: UpdateInfo) {
     return;
   }
   const w = getWin();
-  const isMac = process.platform === 'darwin';
-  const detail = `Usted tiene la versión ${app.getVersion()}.${notesText(info)}`;
-  const buttons = isMac ? ['Abrir la página de descarga', 'Ahora no', 'Omitir esta versión'] : ['Descargar e instalar', 'Ahora no', 'Omitir esta versión'];
+  // en Mac, si la app no se puede reemplazar sola, se ofrece la página de descarga y se dice por qué
+  const macProblem = isMac ? macSelfUpdateProblem() : null;
+  const detail = `Usted tiene la versión ${app.getVersion()}.${macProblem ? `\n\n${macProblem}` : ''}${notesText(info)}`;
+  const buttons = macProblem ? ['Abrir la página de descarga', 'Ahora no', 'Omitir esta versión'] : ['Descargar e instalar', 'Ahora no', 'Omitir esta versión'];
   const opts = { type: 'info' as const, message: `Hay una versión nueva de RociaCAD: ${info.version}`, detail, buttons, defaultId: 0, cancelId: 1, noLink: true };
   const r = w ? await dialog.showMessageBox(w, opts) : await dialog.showMessageBox(opts);
   if (r.response === 2) {
@@ -135,12 +177,37 @@ async function onAvailable(info: UpdateInfo) {
     busy = false;
     return;
   }
-  if (isMac) {
+  if (macProblem) {
     busy = false;
     void shell.openExternal(RELEASES_URL);
     return;
   }
   send('Descargando actualización…');
+  if (isMac) {
+    try {
+      await downloadMacUpdate(info.version, info.files, (pct) => {
+        getWin()?.setProgressBar(pct / 100);
+        send(`Descargando actualización: ${Math.round(pct)} %`);
+      });
+      await onDownloaded(info);
+    } catch (err) {
+      busy = false;
+      getWin()?.setProgressBar(-1);
+      send('');
+      const opts = {
+        type: 'warning' as const,
+        message: 'No se pudo instalar la actualización.',
+        detail: `${(err as Error).message}\n\nPuede intentarlo de nuevo desde Ayuda → Buscar actualizaciones, o descargarla desde la página.`,
+        buttons: ['Abrir la página de descarga', 'Cerrar'],
+        defaultId: 1,
+        cancelId: 1,
+        noLink: true,
+      };
+      const r2 = getWin() ? await dialog.showMessageBox(getWin()!, opts) : await dialog.showMessageBox(opts);
+      if (r2.response === 0) void shell.openExternal(RELEASES_URL);
+    }
+    return;
+  }
   autoUpdater.downloadUpdate().catch(() => {
     busy = false;
   });
@@ -162,7 +229,8 @@ async function onDownloaded(info: UpdateInfo) {
   };
   const r = w ? await dialog.showMessageBox(w, opts) : await dialog.showMessageBox(opts);
   // en ambos casos la instalación ya está autorizada
-  autoUpdater.autoInstallOnAppQuit = true;
+  if (isMac) installOnQuitMac = true;
+  else autoUpdater.autoInstallOnAppQuit = true;
   if (r.response === 0) {
     // cerrar la ventana pasa por la pregunta de "cambios sin guardar"; si el usuario cancela,
     // la versión nueva se instalará cuando cierre la app

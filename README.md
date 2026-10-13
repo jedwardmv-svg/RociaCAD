@@ -16,7 +16,7 @@ Programa libre para diseñar y calcular sistemas de rociadores automáticos cont
 - **Elementos del edificio**: muros, columnas, vigas, losas, cielos falsos, ductos y tuberías de otros sistemas, dibujados sobre el plano y vistos en 3D.
 - **Catálogo editable**: además de las tuberías de fábrica (acero Schedule 10, 40 y 80, galvanizado, CPVC, cobre K/L/M y PVC C900), puede crear sus propias tuberías (diámetros internos y coeficiente C), modelos de rociador (factor K, presión mínima y cobertura de la hoja técnica) y tipos de elemento. El catálogo se exporta e importa como archivo `.rcatalogo` para compartirlo, y cada proyecto guarda los ítems que usa.
 - **Exportar a DXF**: la red en 3D con una capa por diámetro, rociadores y elementos, lista para abrir en AutoCAD. Si hay un plano DXF de fondo, se exporta en sus mismas coordenadas para quedar encima.
-- **Actualizaciones**: la app avisa cuando hay una versión nueva y la instala solo si usted lo autoriza (en Mac abre la página de descarga).
+- **Actualizaciones**: la app avisa cuando hay una versión nueva y, si usted lo autoriza, la descarga, verifica e instala sola y se vuelve a abrir, en Windows, Mac y Linux.
 - Unidades métricas o US, con cambio inmediato.
 - Proyectos en archivos `.rcad` (texto JSON).
 
