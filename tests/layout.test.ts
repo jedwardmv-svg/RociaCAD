@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { addNode, addPipe, calculate, emptyProject, fillRoom, planGrid, spacingLimits, suggestDesignArea } from '../src/core';
+import { checkDesignArea, addNode, addPipe, calculate, emptyProject, fillRoom, planGrid, spacingLimits, suggestDesignArea } from '../src/core';
 
 const M = 1 / 0.3048;
 
@@ -70,6 +70,9 @@ describe('Llenar recinto con rociadores', () => {
     const res = calculate(p);
     expect(res.errors).toEqual([]);
     expect(res.ok).toBe(true);
+    // el área sugerida cumple la forma de NFPA 13
+    expect(checkDesignArea(p)!.shapeOk).toBe(true);
+    expect(checkDesignArea(p)!.countOk).toBe(true);
     // con accesorios automáticos activos (proyecto nuevo)
     expect(Object.values(res.pipes).some((x) => x.fittingsText.includes('auto'))).toBe(true);
   });

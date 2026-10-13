@@ -2,12 +2,12 @@
  * Reporte de cálculo hidráulico para imprimir o exportar a PDF.
  * Se arma dentro de #print-root; los estilos de impresión ocultan la app y muestran solo esto.
  */
-import { fmt, getMaterial, HAZARD_NAMES, internalDiameter, ORIENTATION_NAMES, sizeLabel, unitLabel, type Quantity } from '../../core';
+import { checkDesignArea, fmt, getMaterial, HAZARD_NAMES, internalDiameter, ORIENTATION_NAMES, sizeLabel, unitLabel, type Quantity } from '../../core';
 import { clear, h } from './dom';
 import { store } from './state';
 import { supplyChartSvg } from './supplyChart';
 
-export function buildReport(root: HTMLElement, opts: { image?: string; version: string }) {
+export function buildReport(root: HTMLElement, opts: { image?: string; planImage?: string; version: string }) {
   const p = store.project;
   const r = store.result;
   const u = p.displayUnits;
@@ -76,6 +76,29 @@ export function buildReport(root: HTMLElement, opts: { image?: string; version: 
       ),
     );
     if (opts.image) parts.push(h('section', { class: 'r-image' }, h('h2', null, 'Vista del sistema'), h('img', { src: opts.image, alt: 'Vista 3D del sistema' })));
+
+    // Área de diseño: forma según NFPA 13 y planta
+    const chk = checkDesignArea(p);
+    if (chk) {
+      const yes = (ok: boolean) => (ok ? 'cumple' : 'NO cumple');
+      parts.push(
+        h(
+          'section',
+          { class: 'r-image' },
+          h('h2', null, 'Área de diseño'),
+          kv([
+            ['Rociadores abiertos', `${chk.flowing}; se requieren ${chk.rule.count} (${fmt('area', chk.rule.area, u, true)} ÷ ${fmt('area', chk.rule.coverage, u, true)} por rociador): ${yes(chk.countOk)}`],
+            ['Área que cubren', `${fmt('area', chk.coverage, u, true)}: ${yes(chk.coverageOk)}`],
+            [
+              'Lado paralelo a los ramales',
+              `${fmt('length', chk.parallel, u, true)}; mínimo 1,2·√A = ${fmt('length', chk.rule.minParallel, u, true)} (${chk.rule.perLine} rociadores por ramal): ${yes(chk.shapeOk)}`,
+            ],
+            ['Medidas del área', `${fmt('length', chk.parallel, u, true)} × ${fmt('length', chk.width, u, true)}`],
+          ]),
+          opts.planImage ? h('img', { src: opts.planImage, alt: 'Planta del sistema con el área de diseño' }) : null,
+        ),
+      );
+    }
 
     // Rociadores abiertos
     const flowing = Object.values(r.sprinklers)

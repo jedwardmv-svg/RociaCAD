@@ -453,6 +453,32 @@ textarea.input-text {
   color: #bfe5ff;
 }
 
+.label.pipe {
+  background: rgba(20, 28, 35, 0.6);
+  color: #f2c9cf;
+  font-size: 10px;
+}
+
+.label.pipe.dim {
+  color: #9aa7b2;
+}
+
+.label.critical {
+  background: #b8921a;
+  color: #fff;
+}
+
+.label.area {
+  background: rgba(90, 169, 230, 0.9);
+  color: #fff;
+  font-family: var(--ui);
+  font-weight: 600;
+}
+
+.label.area.bad {
+  background: rgba(255, 138, 61, 0.92);
+}
+
 .label.supply {
   background: var(--water);
   color: #fff;

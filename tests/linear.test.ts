@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { SparseSym, solveCG, solveDense } from '../src/core/linear';
+import { SparseSym, solveCG, solveDense, solveLDL } from '../src/core/linear';
 
 describe('Solucionadores lineales', () => {
   it('gradiente conjugado y eliminación gaussiana dan lo mismo', () => {
@@ -27,5 +27,7 @@ describe('Solucionadores lineales', () => {
     const x1 = solveDense(A, b);
     const x2 = solveCG(A, b);
     for (let i = 0; i < n; i++) expect(x2[i]).toBeCloseTo(x1[i], 6);
+    const x3 = solveLDL(A, b);
+    for (let i = 0; i < n; i++) expect(x3[i]).toBeCloseTo(x1[i], 9);
   });
 });

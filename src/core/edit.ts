@@ -1,7 +1,7 @@
 /**
  * Operaciones de edición del proyecto (puras: modifican el objeto recibido).
  */
-import { calculate } from './calculate';
+import { remoteArea } from './designArea';
 import { HAZARDS } from './hazards';
 import type { Catalog, SprinklerModel } from './catalog';
 import { nextId, type BuildingElement, type Node, type Pipe, type Project, type Sprinkler } from './model';
@@ -124,24 +124,11 @@ function removeOrphans(p: Project) {
 }
 
 /**
- * Sugiere el área de diseño: abre todos los rociadores a la vez y escoge los N con menor
- * presión (los hidráulicamente más remotos). N = área de diseño / cobertura promedio.
- * Es una ayuda: el diseñador debe revisar la forma del área (regla 1.2·√A de NFPA 13).
+ * Sugiere el área de diseño: el rectángulo hidráulicamente más exigente que cumple NFPA 13
+ * (N rociadores, con 1,2·√A paralelo a los ramales). Ver designArea.ts.
  */
 export function suggestDesignArea(p: Project): string[] {
-  if (!p.sprinklers.length) return [];
-  const avg = p.sprinklers.reduce((a, s) => a + s.coverage, 0) / p.sprinklers.length;
-  const n = Math.min(p.sprinklers.length, Math.max(1, Math.ceil(p.criteria.area / avg - 1e-9)));
-  const probe: Project = JSON.parse(JSON.stringify(p));
-  probe.sprinklers.forEach((s) => (s.inDesignArea = true));
-  probe.criteria.hoseAllowance = 0;
-  const r = calculate(probe);
-  if (!r.ok) return [];
-  return Object.values(r.sprinklers)
-    .filter((s) => s.flowing)
-    .sort((a, b) => a.pressure - a.requiredPressure - (b.pressure - b.requiredPressure))
-    .slice(0, n)
-    .map((s) => s.id);
+  return remoteArea(p);
 }
 
 // ---------- Elementos del edificio ----------

@@ -5,6 +5,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { CSS2DObject, CSS2DRenderer } from 'three/examples/jsm/renderers/CSS2DRenderer.js';
 import {
+  checkDesignArea,
   ELEMENT_KIND_SHAPE,
   fmt,
   getElementType,
@@ -16,7 +17,7 @@ import {
   type NominalSize,
   type Project,
 } from '../../core';
-import type { ColorMode, Selection } from './state';
+import type { ColorMode, LabelMode, Selection } from './state';
 import type { Underlay } from '../../core';
 import type { UnderlayAsset } from './underlay';
 
@@ -44,6 +45,8 @@ export const COLORS = {
   node: 0x9aa7b3,
   supply: 0x2e9cca,
   selected: 0x3ee0ff,
+  area: 0x5aa9e6,
+  areaBad: 0xff8a3d,
   inactive: 0x6b7680,
   preview: 0xfff2a8,
 };
@@ -187,7 +190,7 @@ export class Viewer {
   }
 
   /** Reconstruye toda la escena a partir del proyecto y el resultado. */
-  rebuild(project: Project, result: CalcResult | undefined, mode: ColorMode, selection: Selection, showLabels: boolean) {
+  rebuild(project: Project, result: CalcResult | undefined, mode: ColorMode, selection: Selection, labelMode: LabelMode) {
     for (const obj of [...this.model.children]) {
       this.model.remove(obj);
       obj.traverse((o) => {
@@ -265,11 +268,34 @@ export class Viewer {
       mesh.quaternion.setFromUnitVectors(up, dir.normalize());
       this.register(mesh, 'pipe', p.id);
       this.model.add(mesh);
+      if (labelMode !== 'none' && p.role !== 'drop' && len > 1.5) {
+        const mid = va.clone().add(vb).multiplyScalar(0.5);
+        const size = sizeLabel(p.size, metric);
+        if (labelMode === 'names') this.addLabel(mid, `${p.id} · ${size}`, 'label pipe', 0.5);
+        else {
+          const pr = result?.ok ? result.pipes[p.id] : undefined;
+          if (pr && Math.abs(pr.flow) > 0.05) this.addLabel(mid, `${size} · ${fmt('flow', Math.abs(pr.flow), project.displayUnits, true)}`, 'label pipe', 0.5);
+          else this.addLabel(mid, size, 'label pipe dim', 0.5);
+        }
+      }
     }
     if (!Number.isFinite(minR)) minR = 0.06;
 
     // --- Nodos (pequeñas esferas en las uniones) y suministro
     const nodeR = minR * 1.25;
+    const u = project.displayUnits;
+    const headNodes = new Set(project.sprinklers.map((s) => s.nodeId));
+    // conexiones de cada nodo sin contar los bajantes a rociadores (su presión ya sale en el rociador)
+    const degree = new Map<string, number>();
+    const feedsHead = new Set<string>();
+    for (const p of project.pipes) {
+      if (p.role === 'drop' && (headNodes.has(p.from) || headNodes.has(p.to))) {
+        feedsHead.add(headNodes.has(p.from) ? p.to : p.from);
+        continue;
+      }
+      degree.set(p.from, (degree.get(p.from) ?? 0) + 1);
+      degree.set(p.to, (degree.get(p.to) ?? 0) + 1);
+    }
     for (const n of project.nodes) {
       const isSupply = n.id === project.supply.nodeId;
       const mesh = new THREE.Mesh(this.sphere, this.mat(isSupply ? COLORS.supply : COLORS.node, { roughness: 0.7 }));
@@ -280,11 +306,19 @@ export class Viewer {
       this.model.add(mesh);
       if (isSupply) this.addLabel(new THREE.Vector3(n.x, n.y, n.z + rr), 'Suministro', 'label supply');
       const sel = selection && selection.kind === 'node' && selection.id === n.id;
-      if (showLabels && !isSupply && (n.label || sel)) {
+      const name = n.label || n.id;
+      if (labelMode === 'names' && !isSupply && !headNodes.has(n.id)) {
+        this.addLabel(new THREE.Vector3(n.x, n.y, n.z + nodeR), name, 'label');
+      } else if (labelMode === 'results' && !headNodes.has(n.id)) {
+        // presión en las uniones, extremos y el suministro (no en cada punto de un tramo recto)
         const pr = result?.ok ? result.nodes[n.id] : undefined;
-        const name = n.label || n.id;
-        const txt = pr ? `${name}: ${fmt('pressure', pr.pressure, project.displayUnits, true)}` : name;
-        this.addLabel(new THREE.Vector3(n.x, n.y, n.z + nodeR), txt, 'label');
+        const deg = degree.get(n.id) ?? 0;
+        const junction = deg >= 3 || (deg === 1 && !feedsHead.has(n.id));
+        if (pr && (junction || n.label || sel || isSupply)) {
+          this.addLabel(new THREE.Vector3(n.x, n.y, n.z + nodeR), `${isSupply ? 'Suministro' : name}: ${fmt('pressure', pr.pressure, u, true)}`, isSupply ? 'label node supply-res' : 'label node');
+        }
+      } else if (labelMode === 'none' && sel && !isSupply) {
+        this.addLabel(new THREE.Vector3(n.x, n.y, n.z + nodeR), name, 'label');
       }
     }
 
@@ -322,11 +356,38 @@ export class Viewer {
         spray.rotation.x = Math.PI / 2; // eje del cono hacia +z; el vértice queda arriba
         spray.position.z = sign * 0.3 - 1.6;
         g.add(spray);
-        if (showLabels && sr) {
-          this.addLabel(new THREE.Vector3(n.x, n.y, n.z + sign * 0.3), `${s.id}: ${fmt('flow', sr.flow, project.displayUnits, true)}`, 'label flow');
+        if (labelMode === 'results' && sr) {
+          this.addLabel(
+            new THREE.Vector3(n.x, n.y, n.z + sign * 0.3),
+            `${s.id}: ${fmt('pressure', sr.pressure, u, true)} · ${fmt('flow', sr.flow, u, true)}`,
+            s.id === result?.criticalSprinklerId ? 'label flow critical' : 'label flow',
+          );
         }
       }
+      if (labelMode === 'names') this.addLabel(new THREE.Vector3(n.x, n.y, n.z + sign * 0.3), s.id, 'label flow');
       this.model.add(g);
+    }
+
+    // --- Contorno del área de diseño
+    const area = checkDesignArea(project);
+    if (area) {
+      const z = area.z + 0.05;
+      const pts = [...area.outline, area.outline[0]].map((q) => new THREE.Vector3(q.x, q.y, z));
+      const line = new THREE.Line(
+        new THREE.BufferGeometry().setFromPoints(pts),
+        new THREE.LineDashedMaterial({ color: area.shapeOk && area.countOk ? COLORS.area : COLORS.areaBad, dashSize: 1.2, gapSize: 0.8, depthTest: false }),
+      );
+      line.computeLineDistances();
+      line.renderOrder = 5;
+      this.model.add(line);
+      // etiqueta bajo la esquina de menor y (en planta queda debajo del área)
+      const c = [...area.outline].sort((a, b) => a.y - b.y || a.x - b.x)[0];
+      this.addLabel(
+        new THREE.Vector3(c.x, c.y, z),
+        `Área de diseño: ${fmt('length', area.parallel, u, true)} × ${fmt('length', area.width, u, true)}`,
+        `label area below${area.shapeOk && area.countOk ? '' : ' bad'}`,
+        0,
+      );
     }
 
     // --- Leyenda
@@ -358,13 +419,13 @@ export class Viewer {
     this.applySelection(selection);
   }
 
-  private addLabel(pos: THREE.Vector3, text: string, cls: string) {
+  private addLabel(pos: THREE.Vector3, text: string, cls: string, centerX = 0.5) {
     const div = document.createElement('div');
     div.className = cls;
     div.textContent = text;
     const obj = new CSS2DObject(div);
     obj.position.copy(pos);
-    obj.center.set(0.5, 1.15);
+    obj.center.set(centerX, cls.includes('pipe') || cls.includes('below') ? -0.25 : 1.15);
     this.model.add(obj);
   }
 
@@ -772,5 +833,24 @@ export class Viewer {
   snapshot(): string {
     this.renderer.render(this.scene, this.camera);
     return this.renderer.domElement.toDataURL('image/png');
+  }
+
+  /** Imagen de la planta completa (vista superior), sin mover la cámara del usuario */
+  snapshotPlan(): string {
+    const b = this.modelBounds;
+    const center = b.getCenter(new THREE.Vector3());
+    const size = b.getSize(new THREE.Vector3());
+    const w = this.el.clientWidth || 1;
+    const hgt = this.el.clientHeight || 1;
+    const half = Math.max(Math.max(size.x / (w / hgt), size.y) * 0.56, 5);
+    const cam = new THREE.OrthographicCamera((-half * w) / hgt, (half * w) / hgt, half, -half, -20000, 20000);
+    cam.up.set(0, 1, 0);
+    cam.position.set(center.x, center.y, b.max.z + 100);
+    cam.lookAt(center);
+    cam.updateProjectionMatrix();
+    this.renderer.render(this.scene, cam);
+    const url = this.renderer.domElement.toDataURL('image/png');
+    this.renderer.render(this.scene, this.camera);
+    return url;
   }
 }

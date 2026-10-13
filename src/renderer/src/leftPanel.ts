@@ -8,6 +8,7 @@ import {
   SCHEDULE_CLASS_NAMES,
   scheduleClassFor,
   sizeBySchedule,
+  checkDesignArea,
   suggestDesignArea,
   unitLabel,
   type HazardId,
@@ -178,24 +179,45 @@ function supplySection(): HTMLElement {
   );
 }
 
+/** Conexión con la vista para ubicar el área de diseño con el mouse */
+export const designHooks = { placeArea: () => undefined as void };
+
 function areaSection(): HTMLElement {
   const r = store.result;
   const u = store.project.displayUnits;
+  const chk = checkDesignArea(store.project);
   const flowing = store.project.sprinklers.filter((s) => s.inDesignArea);
-  const cov = flowing.reduce((a, s) => a + s.coverage, 0);
+  const rows: (HTMLElement | null)[] = [];
+  const row = (k: string, v: string, bad = false, title = '') => rows.push(h('dt', { title }, k), h('dd', { class: bad ? 'bad' : '', title }, v));
+  if (chk) {
+    const rule = chk.rule;
+    row('Rociadores abiertos', `${chk.flowing} de ${rule.count}`, !chk.countOk, `Área de diseño ÷ cobertura por rociador = ${rule.count}`);
+    row('Área que cubren', `${fmt('area', chk.coverage, u, true)} de ${fmt('area', rule.area, u, true)}`, !chk.coverageOk);
+    row(
+      'Lado paralelo a ramales',
+      `${fmt('length', chk.parallel, u, true)} (mín. ${fmt('length', rule.minParallel, u, true)})`,
+      !chk.shapeOk,
+      `NFPA 13: el área es rectangular y su lado paralelo a los ramales mide al menos 1,2·√A. Son ${rule.perLine} rociadores por ramal.`,
+    );
+    if (r.ok) row('Rociador más exigido', r.criticalSprinklerId ?? '—');
+  } else {
+    row('Rociadores abiertos', String(flowing.length));
+  }
+  const suggest = () => {
+    flash('Buscando el área más exigente…');
+    // dejar que se pinte el aviso antes del cálculo
+    setTimeout(() => {
+      const ids = suggestDesignArea(store.project);
+      if (!ids.length) return flash('No se pudo sugerir un área: revise que la red esté conectada al suministro');
+      store.mutate((p) => p.sprinklers.forEach((s) => (s.inDesignArea = ids.includes(s.id))));
+      flash(`Área remota con ${ids.length} rociadores: la de forma NFPA 13 que más exige al suministro.`);
+    }, 30);
+  };
   return h(
     'section',
     { class: 'section' },
     h('h2', null, 'Área de diseño'),
-    h(
-      'dl',
-      { class: 'readout' },
-      h('dt', null, 'Rociadores abiertos'),
-      h('dd', null, String(flowing.length)),
-      h('dt', null, 'Área que cubren'),
-      h('dd', { class: cov + 1e-6 < store.project.criteria.area ? 'bad' : '' }, fmt('area', cov, u, true)),
-      r.ok ? [h('dt', null, 'Rociador más exigido'), h('dd', null, r.criticalSprinklerId ?? '—')] : null,
-    ),
+    h('dl', { class: 'readout' }, rows),
     h(
       'div',
       { class: 'btn-row' },
@@ -203,16 +225,12 @@ function areaSection(): HTMLElement {
         'button',
         {
           class: 'btn outline small',
-          title: 'Abre los rociadores hidráulicamente más lejanos hasta cubrir el área de diseño',
-          onclick: () => {
-            const ids = suggestDesignArea(store.project);
-            if (!ids.length) return flash('No se pudo sugerir un área: revise que la red esté conectada al suministro');
-            store.mutate((p) => p.sprinklers.forEach((s) => (s.inDesignArea = ids.includes(s.id))));
-            flash(`Área sugerida con ${ids.length} rociadores. Revise que su forma cumpla la norma.`);
-          },
+          title: 'Prueba los rectángulos posibles (N rociadores, 1,2·√A paralelo a los ramales) y deja el que más exige al suministro',
+          onclick: suggest,
         },
         'Sugerir área remota',
       ),
+      h('button', { class: 'btn outline small', title: 'Mueva el rectángulo del área con el mouse y haga clic donde va (tecla A)', onclick: () => designHooks.placeArea() }, 'Ubicar con el mouse'),
       h(
         'button',
         { class: 'btn outline small', onclick: () => store.mutate((p) => p.sprinklers.forEach((s) => (s.inDesignArea = false))) },

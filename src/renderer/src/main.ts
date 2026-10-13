@@ -11,6 +11,9 @@ import {
   deletePipe,
   deleteSprinkler,
   emptyProject,
+  areaBox,
+  pickAreaAt,
+  type AreaBox,
   deleteItems,
   emptyItems,
   fillRoom,
@@ -46,10 +49,10 @@ import { buildDxf } from '../../core';
 import { clear, h } from './dom';
 import { flash, numInput, selectInput } from './fields';
 import { editHooks, renderInspector } from './inspector';
-import { renderLeft } from './leftPanel';
+import { designHooks, renderLeft } from './leftPanel';
 import { buildReport } from './report';
 import { planHooks } from './planPanel';
-import { selectionFrom, store, toggleInSelection, type ColorMode, type Tool } from './state';
+import { selectionFrom, store, toggleInSelection, type ColorMode, type LabelMode, type Tool } from './state';
 import { createUnderlay, loadAsset, pickPlanFile, setMaxTexture, type UnderlayAsset } from './underlay';
 import { Viewer, type ViewName } from './viewer3d';
 
@@ -112,7 +115,7 @@ function createViewer(): Viewer {
 }
 
 function rebuildViewer() {
-  viewer.rebuild(store.project, store.result, store.colorMode, store.selection, store.showLabels);
+  viewer.rebuild(store.project, store.result, store.colorMode, store.selection, store.labelMode);
   syncUnderlay();
   renderLegend();
 }
@@ -163,6 +166,23 @@ function renderToolbar() {
   );
   colorSel.style.width = 'auto';
   colorSel.style.height = '30px';
+  const labelSel = selectInput<LabelMode>(
+    'Etiquetas en el dibujo',
+    store.labelMode,
+    [
+      { value: 'none', label: 'Sin etiquetas' },
+      { value: 'names', label: 'Etiquetas: nombres' },
+      { value: 'results', label: 'Etiquetas: resultados' },
+    ],
+    'label-mode',
+    (v) => {
+      store.labelMode = v;
+      rebuildViewer();
+    },
+  );
+  labelSel.style.width = 'auto';
+  labelSel.style.height = '30px';
+  labelSel.title = 'Nombres: nodos, tubos y rociadores. Resultados: presión en uniones, presión y caudal de los rociadores abiertos, diámetro y caudal de los tubos.';
   const mark = h('span', { class: 'brand' });
   mark.innerHTML =
     '<svg viewBox="0 0 24 24"><rect x="1" y="1" width="22" height="22" rx="5" fill="#24303a"/><path d="M12 4v6" stroke="#e5484d" stroke-width="2.2" stroke-linecap="round"/><path d="M8 10.5h8" stroke="#e8edf1" stroke-width="1.8" stroke-linecap="round"/>' +
@@ -198,16 +218,7 @@ function renderToolbar() {
       'div',
       { class: 'tb-group' },
       colorSel,
-      iconBtn(
-        I.labels,
-        'Mostrar etiquetas',
-        () => {
-          store.showLabels = !store.showLabels;
-          renderToolbar();
-          rebuildViewer();
-        },
-        { active: store.showLabels },
-      ),
+      labelSel,
     ),
     h('div', { class: 'tb-spacer' }),
     units,
@@ -256,6 +267,7 @@ function setTool(t: Tool) {
   elementId = null;
   fillStart = null;
   vector.a = null;
+  areaTool = t === 'area' ? startAreaTool() : null;
   viewer.setPreview(null, null);
   $('viewport').classList.toggle('drawing', t !== 'select');
   renderToolbar();
@@ -418,6 +430,7 @@ function renderHint() {
         ? 'El cursor se ajusta a los extremos de las líneas del plano. Esc cancela.'
         : 'Acerque la vista y haga clic con precisión en los dos puntos. Esc cancela.',
     'move-plan': 'El destino se ajusta a los nodos del sistema. Esc cancela.',
+    area: 'Mueva el rectángulo sobre la zona más remota y haga clic para abrir esos rociadores. Esc cancela.',
     'pick-vector': vector.a ? 'Clic en el punto de destino. Esc cancela.' : 'Clic en el punto base (se ajusta a los nodos y al plano). Esc cancela.',
   };
   $('hint').textContent = hints[store.tool];
@@ -687,6 +700,58 @@ function onVectorMove(ev: PointerEvent) {
   }
 }
 
+// ---------- Ubicar el área de diseño ----------
+let areaTool: { box: AreaBox; z: number } | null = null;
+
+function startAreaTool(): { box: AreaBox; z: number } | null {
+  const p = store.project;
+  if (!p.sprinklers.length) return null;
+  const nodes = new Map(p.nodes.map((n) => [n.id, n]));
+  const zs = p.sprinklers.map((s) => nodes.get(s.nodeId)?.z ?? 0).sort((a, b) => a - b);
+  return { box: areaBox(p), z: zs[Math.floor(zs.length / 2)] };
+}
+
+designHooks.placeArea = () => {
+  if (!store.project.sprinklers.length) return flash('Primero ponga rociadores');
+  setTool('area');
+};
+
+function areaAt(ev: PointerEvent) {
+  if (!areaTool) return null;
+  const pt = viewer.planePoint(ev, areaTool.z);
+  if (!pt) return null;
+  return { pt, ids: pickAreaAt(store.project, pt.x, pt.y, areaTool.box) };
+}
+
+function onAreaMove(ev: PointerEvent) {
+  const a = areaAt(ev);
+  if (!a || !areaTool) return viewer.setPreview(null, null);
+  const { box, z } = areaTool;
+  const { dir } = box;
+  const corner = (sa: number, sc: number) =>
+    new THREE.Vector3(a.pt.x + (sa * box.parallel * dir.x) / 2 - (sc * box.width * dir.y) / 2, a.pt.y + (sa * box.parallel * dir.y) / 2 + (sc * box.width * dir.x) / 2, z);
+  const rect = [corner(-1, -1), corner(1, -1), corner(1, 1), corner(-1, 1), corner(-1, -1)];
+  const nodes = new Map(store.project.nodes.map((n) => [n.id, n]));
+  const dots = store.project.sprinklers
+    .filter((s) => a.ids.includes(s.id))
+    .map((s) => {
+      const n = nodes.get(s.nodeId)!;
+      return new THREE.Vector3(n.x, n.y, n.z);
+    });
+  viewer.setPreview(null, null, false, rect, dots);
+  const u = store.project.displayUnits;
+  $('hint').textContent = `${a.ids.length} rociadores (se necesitan ${box.rule.count}, ${box.rule.perLine} por ramal) · ${fmt('length', box.parallel, u, true)} × ${fmt('length', box.width, u, true)}. Clic para ubicar. Esc cancela.`;
+}
+
+function onAreaClick(ev: PointerEvent) {
+  const a = areaAt(ev);
+  if (!a) return;
+  if (!a.ids.length) return flash('No hay rociadores en ese lugar');
+  store.mutate((p) => p.sprinklers.forEach((s) => (s.inDesignArea = a.ids.includes(s.id))));
+  setTool('select');
+  flash(`Área de diseño con ${a.ids.length} rociadores`);
+}
+
 // ---------- Llenar recinto ----------
 let fillStart: THREE.Vector3 | null = null;
 
@@ -835,7 +900,7 @@ canvas.addEventListener('pointerup', (e) => {
     if (store.tool === 'calibrate' || store.tool === 'move-plan') return setTool('select');
     if (store.tool === 'element') return endElement();
     if (store.tool === 'fill') return cancelFill();
-    if (store.tool === 'pick-vector') return setTool('select');
+    if (store.tool === 'pick-vector' || store.tool === 'area') return setTool('select');
     if (store.tool === 'draw' && drawStart) {
       drawStart = null;
       viewer.setPreview(null, null);
@@ -850,6 +915,7 @@ canvas.addEventListener('pointerup', (e) => {
   if (store.tool === 'element') return onElementClick(e);
   if (store.tool === 'fill') return onFillClick(e);
   if (store.tool === 'pick-vector') return onVectorClick(e);
+  if (store.tool === 'area') return onAreaClick(e);
   const hit = viewer.pick(e);
   if (e.ctrlKey || e.metaKey) {
     if (hit) store.select(toggleInSelection(store.selection, hit.kind, hit.id));
@@ -957,6 +1023,7 @@ canvas.addEventListener('pointermove', (e) => {
   }
   if (store.tool === 'fill') return onFillMove(e);
   if (store.tool === 'pick-vector') return onVectorMove(e);
+  if (store.tool === 'area') return onAreaMove(e);
   if (store.tool !== 'draw') return;
   const t = drawTarget(e);
   viewer.setPreview(drawStart?.point ?? null, t?.point ?? null, !!t?.nodeId || !!t?.pipeId || !!t?.onPlan);
@@ -1228,7 +1295,8 @@ const actions = {
   async exportPdf() {
     store.recalcNow();
     const image = viewer.snapshot();
-    buildReport($('print-root'), { image, version: appVersion });
+    const planImage = viewer.snapshotPlan();
+    buildReport($('print-root'), { image, planImage, version: appVersion });
     await document.fonts.ready;
     if (desktop) {
       const r = await desktop.exportPdf({ suggestedName: `Memoria de cálculo - ${fileBaseName()}` });
@@ -1373,6 +1441,7 @@ window.addEventListener('keydown', (e) => {
   else if (!mod && e.key.toLowerCase() === 'r') setTool('sprinkler');
   else if (!mod && e.key.toLowerCase() === 'e') setTool('element');
   else if (!mod && e.key.toLowerCase() === 'l') setTool('fill');
+  else if (!mod && e.key.toLowerCase() === 'a') designHooks.placeArea();
 });
 
 // ---------- Barra de estado ----------

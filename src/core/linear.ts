@@ -129,6 +129,112 @@ export function solveCG(A: SparseSym, b: Float64Array, tol = 1e-13, maxIter?: nu
   return x;
 }
 
+/**
+ * Factorización LDLᵀ dispersa con orden de mínimo grado.
+ * Las redes de rociadores son casi árboles: eliminando primero los nodos con menos conexiones
+ * (los extremos de los ramales) casi no aparecen términos nuevos, así que el costo crece
+ * linealmente con el tamaño de la red. La matriz es simétrica definida positiva: no hace falta
+ * pivoteo.
+ */
+export function solveLDL(A: SparseSym, b: Float64Array): Float64Array {
+  const n = A.n;
+  const rows: Map<number, number>[] = A.off.map((r) => new Map(r));
+  const diag = Float64Array.from(A.diag);
+  const rhs = Float64Array.from(b);
+  const done = new Uint8Array(n);
+  const order = new Int32Array(n);
+  const dv = new Float64Array(n);
+  const lIdx: Int32Array[] = new Array(n);
+  const lVal: Float64Array[] = new Array(n);
+
+  // montículo (grado, nodo) con entradas perezosas
+  const heapD: number[] = [];
+  const heapV: number[] = [];
+  const push = (d: number, v: number) => {
+    let i = heapD.length;
+    heapD.push(d);
+    heapV.push(v);
+    while (i > 0) {
+      const p = (i - 1) >> 1;
+      if (heapD[p] <= heapD[i]) break;
+      [heapD[p], heapD[i]] = [heapD[i], heapD[p]];
+      [heapV[p], heapV[i]] = [heapV[i], heapV[p]];
+      i = p;
+    }
+  };
+  const pop = (): [number, number] => {
+    const d = heapD[0];
+    const v = heapV[0];
+    const ld = heapD.pop()!;
+    const lv = heapV.pop()!;
+    if (heapD.length) {
+      heapD[0] = ld;
+      heapV[0] = lv;
+      let i = 0;
+      for (;;) {
+        const l = 2 * i + 1;
+        const r = l + 1;
+        let m = i;
+        if (l < heapD.length && heapD[l] < heapD[m]) m = l;
+        if (r < heapD.length && heapD[r] < heapD[m]) m = r;
+        if (m === i) break;
+        [heapD[m], heapD[i]] = [heapD[i], heapD[m]];
+        [heapV[m], heapV[i]] = [heapV[i], heapV[m]];
+        i = m;
+      }
+    }
+    return [d, v];
+  };
+  for (let i = 0; i < n; i++) push(rows[i].size, i);
+
+  for (let k = 0; k < n; k++) {
+    let v = -1;
+    while (heapD.length) {
+      const [d, u] = pop();
+      if (!done[u] && d === rows[u].size) {
+        v = u;
+        break;
+      }
+    }
+    if (v < 0) throw new Error('Error interno al resolver la red.');
+    const d = diag[v];
+    if (!(d > 0) || !Number.isFinite(d)) throw new Error('Sistema singular: revise que todos los tubos estén conectados al suministro.');
+    done[v] = 1;
+    order[k] = v;
+    dv[v] = d;
+    const nb = [...rows[v].entries()];
+    const idx = new Int32Array(nb.length);
+    const val = new Float64Array(nb.length);
+    for (let a = 0; a < nb.length; a++) {
+      const [i, aiv] = nb[a];
+      const li = aiv / d;
+      idx[a] = i;
+      val[a] = li;
+      rows[i].delete(v);
+      rhs[i] -= li * rhs[v];
+      diag[i] -= li * aiv;
+      for (let c = 0; c < nb.length; c++) {
+        if (c === a) continue;
+        const [j, avj] = nb[c];
+        rows[i].set(j, (rows[i].get(j) ?? 0) - li * avj);
+      }
+    }
+    lIdx[v] = idx;
+    lVal[v] = val;
+    for (const i of idx) push(rows[i].size, i);
+  }
+  const x = new Float64Array(n);
+  for (let k = n - 1; k >= 0; k--) {
+    const v = order[k];
+    let s = rhs[v] / dv[v];
+    const idx = lIdx[v];
+    const val = lVal[v];
+    for (let a = 0; a < idx.length; a++) s -= val[a] * x[idx[a]];
+    x[v] = s;
+  }
+  return x;
+}
+
 export function solveSym(A: SparseSym, b: Float64Array): Float64Array {
-  return A.n <= 600 ? solveDense(A, b) : solveCG(A, b);
+  return solveLDL(A, b);
 }

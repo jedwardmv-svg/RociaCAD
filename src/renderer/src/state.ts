@@ -49,9 +49,12 @@ export function isSelected(sel: Selection, kind: string, id: string): boolean {
   return sel.kind === kind && sel.id === id;
 }
 
-export type Tool = 'select' | 'draw' | 'sprinkler' | 'fill' | 'element' | 'calibrate' | 'move-plan' | 'pick-vector';
+export type Tool = 'select' | 'draw' | 'sprinkler' | 'fill' | 'element' | 'calibrate' | 'move-plan' | 'pick-vector' | 'area';
 
 export type ColorMode = 'material' | 'size' | 'pressure' | 'velocity';
+
+/** Etiquetas en el dibujo: ninguna, nombres (N1, T3, S5 y diámetros) o resultados del cálculo */
+export type LabelMode = 'none' | 'names' | 'results';
 
 type Listener = (why: ChangeKind) => void;
 export type ChangeKind = 'project' | 'selection' | 'result' | 'tool' | 'view' | 'file';
@@ -65,7 +68,7 @@ class Store {
   selection: Selection = null;
   tool: Tool = 'select';
   colorMode: ColorMode = 'material';
-  showLabels = false;
+  labelMode: LabelMode = 'none';
   filePath: string | null = null;
   fileName: string | null = null;
   dirty = false;
