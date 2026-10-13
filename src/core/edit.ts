@@ -68,6 +68,15 @@ export function splitPipe(p: Project, pipeId: string, x: number, y: number, z: n
     idOverride: pipe.idOverride,
   });
   if (oldLen !== undefined) second.lengthOverride = oldLen * (1 - t);
+  // los soportes del tubo quedan donde estaban, en el tramo que les toca
+  for (const h of p.hangers ?? []) {
+    if (h.pipeId !== pipe.id) continue;
+    if (h.t <= t) h.t = h.t / t;
+    else {
+      h.pipeId = second.id;
+      h.t = (h.t - t) / (1 - t);
+    }
+  }
   return node;
 }
 
@@ -121,6 +130,10 @@ function removeOrphans(p: Project) {
   }
   p.nodes = p.nodes.filter((n) => used.has(n.id));
   p.sprinklers = p.sprinklers.filter((s) => used.has(s.nodeId));
+  if (p.hangers) {
+    const ids = new Set(p.pipes.map((x) => x.id));
+    p.hangers = p.hangers.filter((h) => ids.has(h.pipeId));
+  }
 }
 
 /**

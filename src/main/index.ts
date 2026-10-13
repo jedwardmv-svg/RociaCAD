@@ -7,11 +7,12 @@ import { basename, join } from 'node:path';
 import './dwg';
 import { checkForUpdates, initUpdater, installIfRequested, loadSettings, saveSettings } from './updater';
 
-type FileKind = 'project' | 'catalog' | 'dxf';
+type FileKind = 'project' | 'catalog' | 'dxf' | 'csv';
 const KINDS: Record<FileKind, { name: string; ext: string; fallback: string }> = {
   project: { name: 'Proyecto RociaCAD', ext: 'rcad', fallback: 'proyecto' },
   catalog: { name: 'Catálogo RociaCAD', ext: 'rcatalogo', fallback: 'catalogo' },
   dxf: { name: 'Dibujo DXF', ext: 'dxf', fallback: 'dibujo' },
+  csv: { name: 'Tabla CSV (Excel)', ext: 'csv', fallback: 'lista' },
 };
 const filtersFor = (kind: FileKind) => [{ name: KINDS[kind].name, extensions: [KINDS[kind].ext] }];
 

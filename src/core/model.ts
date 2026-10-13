@@ -4,6 +4,7 @@
  */
 import type { Catalog } from './catalog';
 import type { FittingType } from './fittings';
+import type { Hanger } from './hangers';
 import type { HazardId } from './hazards';
 import type { MaterialId, NominalSize } from './pipes';
 import type { UnitSystem } from './units';
@@ -229,6 +230,17 @@ export interface Project {
   underlay?: Underlay;
   /** Sumar al cálculo los codos y tees que se deducen del dibujo */
   autoFittings?: boolean;
+  /** Soportes de la tubería */
+  hangers?: Hanger[];
+  /** Altura de la estructura para las varillas cuando no hay losa o viga dibujada (ft) */
+  hangerStructureZ?: number;
+  /** Datos de fabricación (lista de corte) */
+  fabrication?: FabricationSettings;
+}
+
+export interface FabricationSettings {
+  /** acero: roscado hasta este diámetro, ranurado por encima (por omisión 2") */
+  threadedMax?: NominalSize;
 }
 
 /** Datos binarios de archivos adjuntos (plano de fondo), en base64. */

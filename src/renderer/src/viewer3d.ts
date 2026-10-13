@@ -5,7 +5,11 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { CSS2DObject, CSS2DRenderer } from 'three/examples/jsm/renderers/CSS2DRenderer.js';
 import {
+  buildCutList,
+  hangerPoint,
+  hangerRodLength,
   checkDesignArea,
+  OD_IN,
   ELEMENT_KIND_SHAPE,
   fmt,
   getElementType,
@@ -18,13 +22,14 @@ import {
   type Project,
 } from '../../core';
 import type { ColorMode, LabelMode, Selection } from './state';
+import { fmtCut } from './fabrication';
 import type { Underlay } from '../../core';
 import type { UnderlayAsset } from './underlay';
 
 export type ViewName = '3d' | 'top' | 'front' | 'side';
 
 export interface Hit {
-  kind: 'node' | 'pipe' | 'sprinkler' | 'element';
+  kind: 'node' | 'pipe' | 'sprinkler' | 'element' | 'hanger';
   id: string;
   point: THREE.Vector3;
 }
@@ -46,16 +51,12 @@ export const COLORS = {
   supply: 0x2e9cca,
   selected: 0x3ee0ff,
   area: 0x5aa9e6,
+  hanger: 0x9aa7b2,
   areaBad: 0xff8a3d,
   inactive: 0x6b7680,
   preview: 0xfff2a8,
 };
 
-/** Diámetro exterior aproximado (in) para dibujar los tubos */
-const OD_IN: Record<NominalSize, number> = {
-  '3/4': 1.05, '1': 1.315, '1-1/4': 1.66, '1-1/2': 1.9, '2': 2.375, '2-1/2': 2.875, '3': 3.5,
-  '3-1/2': 4.0, '4': 4.5, '5': 5.563, '6': 6.625, '8': 8.625, '10': 10.75, '12': 12.75,
-};
 
 /** Rampa secuencial para presión/velocidad (de bajo a alto) */
 const RAMP = ['#5aa9e6', '#4fc3c9', '#7fd18b', '#e8c547', '#ef8f3c', '#e5484d'];
@@ -268,7 +269,7 @@ export class Viewer {
       mesh.quaternion.setFromUnitVectors(up, dir.normalize());
       this.register(mesh, 'pipe', p.id);
       this.model.add(mesh);
-      if (labelMode !== 'none' && p.role !== 'drop' && len > 1.5) {
+      if ((labelMode === 'names' || labelMode === 'results') && p.role !== 'drop' && len > 1.5) {
         const mid = va.clone().add(vb).multiplyScalar(0.5);
         const size = sizeLabel(p.size, metric);
         if (labelMode === 'names') this.addLabel(mid, `${p.id} · ${size}`, 'label pipe', 0.5);
@@ -366,6 +367,48 @@ export class Viewer {
       }
       if (labelMode === 'names') this.addLabel(new THREE.Vector3(n.x, n.y, n.z + sign * 0.3), s.id, 'label flow');
       this.model.add(g);
+    }
+
+    // --- Soportes: varilla hasta la estructura y abrazadera
+    if (project.hangers?.length) {
+      const steelMat = this.mat(COLORS.hanger, { metalness: 0.5, roughness: 0.5 });
+      for (const hg of project.hangers) {
+        const pt = hangerPoint(project, hg);
+        if (!pt) continue;
+        const r = Math.max(((OD_IN[pt.pipe.size] ?? 2) / 24) * 2.2, 0.1);
+        if (hg.kind === 'riser-clamp') {
+          const ring = new THREE.Mesh(new THREE.TorusGeometry(r * 1.6, r * 0.35, 8, 20), steelMat);
+          ring.position.set(pt.x, pt.y, pt.z);
+          this.register(ring, 'hanger', hg.id);
+          this.model.add(ring);
+          continue;
+        }
+        const rod = hangerRodLength(project, hg);
+        const top = pt.z + r;
+        const g = new THREE.Mesh(this.unitCylinder, steelMat);
+        const len = rod > 0 ? rod : 0.3;
+        g.scale.set(Math.max(0.035, r * 0.18), len, Math.max(0.035, r * 0.18));
+        g.rotation.x = Math.PI / 2;
+        g.position.set(pt.x, pt.y, top + len / 2);
+        this.register(g, 'hanger', hg.id);
+        this.model.add(g);
+        const ring = new THREE.Mesh(new THREE.TorusGeometry(r * 1.25, r * 0.22, 6, 16), steelMat);
+        // el anillo abraza el tubo: perpendicular al eje del tubo
+        const a = nodes.get(pt.pipe.from)!;
+        const b = nodes.get(pt.pipe.to)!;
+        ring.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), new THREE.Vector3(b.x - a.x, b.y - a.y, b.z - a.z).normalize());
+        ring.position.set(pt.x, pt.y, pt.z);
+        this.register(ring, 'hanger', hg.id);
+        this.model.add(ring);
+      }
+    }
+
+    // --- Etiquetas de las piezas de corte
+    if (labelMode === 'pieces') {
+      for (const pc of buildCutList(project).pieces) {
+        const mid = new THREE.Vector3((pc.a.x + pc.b.x) / 2, (pc.a.y + pc.b.y) / 2, (pc.a.z + pc.b.z) / 2);
+        this.addLabel(mid, `${pc.id} · ${fmtCut(pc.cutFt, u)}`, `label pipe${pc.cutFt <= 0.05 ? ' bad' : ''}`, 0.5);
+      }
     }
 
     // --- Contorno del área de diseño

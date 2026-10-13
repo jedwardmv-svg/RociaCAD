@@ -3,6 +3,13 @@
  */
 import {
   addDropWithSprinkler,
+  placeHangers,
+  hangerPoint,
+  hangerRodLength,
+  hangerTypeName,
+  maxHangerSpacing,
+  rodDiameter,
+  structureAbove,
   effectiveC,
   closeItems,
   deleteItems,
@@ -57,6 +64,7 @@ export function renderInspector(el: HTMLElement) {
     if (sel.kind === 'node') return clear(el, nodePanel(sel.id));
     if (sel.kind === 'element') return clear(el, elementPanel(sel.id));
     if (sel.kind === 'multi') return clear(el, multiPanel(sel.items));
+    if (sel.kind === 'hanger') return clear(el, hangerPanel(sel.id));
     return clear(el, sprinklerPanel(sel.id));
   });
 }
@@ -761,6 +769,20 @@ function multiPanel(items: ItemSet): HTMLElement {
             'div',
             { class: 'btn-row' },
             h('button', { class: 'btn outline small', title: 'Diámetros mínimos de la tabla de NFPA 13 para estos tubos', onclick: () => runSizing(pipeIds) }, 'Dimensionar por tabla'),
+            h(
+              'button',
+              {
+                class: 'btn outline small',
+                title: 'Pone soportes en las líneas de estos tubos (reemplaza los que tenían)',
+                onclick: () =>
+                  after(() => {
+                    let n = 0;
+                    store.mutate((pp) => (n = placeHangers(pp, { pipeIds }).added));
+                    return `${n} soportes colocados`;
+                  }),
+              },
+              'Colocar soportes',
+            ),
           ),
         )
       : null,
@@ -790,4 +812,87 @@ function multiPanel(items: ItemSet): HTMLElement {
 
 function flashMsg(msg: string) {
   flash(msg);
+}
+
+// ---------- Soporte ----------
+
+function hangerPanel(id: string): HTMLElement {
+  const p = store.project;
+  const u = p.displayUnits;
+  const hg = (p.hangers ?? []).find((x) => x.id === id);
+  if (!hg) return emptyHelp();
+  const pt = hangerPoint(p, hg);
+  if (!pt) return emptyHelp();
+  const pipe = pt.pipe;
+  const a = p.nodes.find((n) => n.id === pipe.from)!;
+  const b = p.nodes.find((n) => n.id === pipe.to)!;
+  const len = Math.hypot(b.x - a.x, b.y - a.y, b.z - a.z);
+  const set = (fn: (x: NonNullable<typeof hg>) => void) =>
+    store.mutate((pp) => {
+      const x = (pp.hangers ?? []).find((y) => y.id === id);
+      if (x) fn(x);
+    });
+  const auto = structureAbove(p, pt.x, pt.y, pt.z);
+  const rod = hangerRodLength(p, hg);
+  return h(
+    'div',
+    null,
+    h('section', { class: 'section' }, title(`Soporte ${id}`, `en el tubo ${pipe.id}`)),
+    h(
+      'section',
+      { class: 'section' },
+      readout([
+        ['Tipo', `${hangerTypeName(hg, pipe.size)} ${sizeLabel(pipe.size, u === 'metric')}`],
+        ['Distancia máxima', fmt('length', maxHangerSpacing(p, pipe) ?? NaN, u, true)],
+        ...(hg.kind === 'hanger'
+          ? ([
+              ['Varilla', `${rodDiameter(pipe.size)}"`],
+              ['Largo de varilla', fmt('length', rod, u, true), !(rod > 0)],
+            ] as [string, string, boolean?][])
+          : []),
+      ]),
+      numField({
+        label: `Distancia desde ${pipe.from}`,
+        q: 'length',
+        value: hg.t * len,
+        key: 'hg-pos',
+        min: 0,
+        max: len,
+        onCommit: (v) => set((x) => (x.t = Math.max(0, Math.min(1, v / len)))),
+      }),
+      hg.kind === 'hanger'
+        ? numField({
+            label: 'Estructura a',
+            q: 'elevation',
+            value: hg.structureZ,
+            placeholder: fmt('elevation', auto, u),
+            allowEmpty: true,
+            key: 'hg-struct',
+            hint: 'Altura donde se ancla la varilla. Vacío: la losa o viga dibujada encima, o la altura de estructura del proyecto',
+            onCommit: (v) => set((x) => (x.structureZ = v)),
+            onClear: () => set((x) => delete x.structureZ),
+          })
+        : null,
+    ),
+    h(
+      'section',
+      { class: 'section' },
+      h(
+        'div',
+        { class: 'btn-row' },
+        h('button', { class: 'btn outline small', onclick: () => store.select({ kind: 'pipe', id: pipe.id }) }, 'Ver el tubo'),
+        h(
+          'button',
+          {
+            class: 'btn outline small danger',
+            onclick: () => {
+              store.mutate((pp) => (pp.hangers = (pp.hangers ?? []).filter((x) => x.id !== id)));
+              store.select(null);
+            },
+          },
+          'Eliminar soporte',
+        ),
+      ),
+    ),
+  );
 }

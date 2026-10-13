@@ -27,6 +27,25 @@ export const DN_MM: Record<NominalSize, number> = {
   '3-1/2': 90, '4': 100, '5': 125, '6': 150, '8': 200, '10': 250, '12': 300,
 };
 
+/** Diámetro exterior (in) de la tubería de acero por tamaño (ASME B36.10); aproximado para otros materiales */
+export const OD_IN: Record<NominalSize, number> = {
+  '3/4': 1.05, '1': 1.315, '1-1/4': 1.66, '1-1/2': 1.9, '2': 2.375, '2-1/2': 2.875, '3': 3.5,
+  '3-1/2': 4.0, '4': 4.5, '5': 5.563, '6': 6.625, '8': 8.625, '10': 10.75, '12': 12.75,
+};
+
+/** Familia del material, para reglas que dependen de él (soportes, uniones) */
+export type MaterialFamily = 'steel' | 'copper' | 'cpvc' | 'buried' | 'other';
+
+export function materialFamily(id: string, project?: Pick<Project, 'catalog'>): MaterialFamily {
+  const m = getMaterial(id, project);
+  const t = `${m.id} ${m.name}`.toLowerCase();
+  if (/cpvc/.test(t)) return 'cpvc';
+  if (/pvc|c900|hdpe|polietileno|enterrad/.test(t)) return 'buried';
+  if (/copper|cobre/.test(t)) return 'copper';
+  if (/steel|acero|galv/.test(t)) return 'steel';
+  return 'other';
+}
+
 /** Identificador de material: los de fábrica o uno creado por el usuario. */
 export type MaterialId = string;
 

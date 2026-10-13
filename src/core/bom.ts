@@ -10,8 +10,9 @@ import { FITTING_NAMES, VALVE_TYPES } from './fittings';
 import { ORIENTATION_NAMES, type Project } from './model';
 import { getMaterial, NOMINAL_SIZES, sizeLabel, type MaterialId, type NominalSize } from './pipes';
 import { pipeGeometry } from './calculate';
+import { hangerRodLength, hangerTypeName, rodDiameter } from './hangers';
 
-export type BomCategory = 'Tubería' | 'Accesorios' | 'Válvulas' | 'Rociadores';
+export type BomCategory = 'Tubería' | 'Accesorios' | 'Válvulas' | 'Rociadores' | 'Soportes';
 
 export interface BomItem {
   /** clave estable para guardar precios */
@@ -156,7 +157,36 @@ export function buildBom(project: Project): Bom {
     );
   }
 
-  const order: BomCategory[] = ['Tubería', 'Accesorios', 'Válvulas', 'Rociadores'];
+  // --- Soportes: colgantes, abrazaderas, varilla roscada (en tramos de 3 m) y anclajes
+  const ROD_STICK = 3 / 0.3048;
+  const rods = new Map<string, number[]>();
+  for (const hg of project.hangers ?? []) {
+    const pipe = project.pipes.find((x) => x.id === hg.pipeId);
+    if (!pipe) continue;
+    const name = hangerTypeName(hg, pipe.size);
+    add(`hanger|${hg.kind}|${pipe.size}`, 'Soportes', `${name} ${sz(pipe.size)}`, 1, 'und');
+    if (hg.kind !== 'hanger') continue;
+    const rod = rodDiameter(pipe.size);
+    const l = hangerRodLength(project, hg);
+    if (l > 0) (rods.get(rod) ?? rods.set(rod, []).get(rod)!).push(l);
+    add(`anchor|${rod}`, 'Soportes', `Anclaje a la estructura para varilla de ${rod}"`, 1, 'und');
+  }
+  for (const [rod, lengths] of rods) {
+    // acomodar los pedazos en varillas de 3 m (primero los más largos)
+    const bins: number[] = [];
+    for (const l of [...lengths].sort((a, b) => b - a)) {
+      const piece = Math.min(l, ROD_STICK);
+      const i = bins.findIndex((free) => free + 1e-9 >= piece);
+      if (i >= 0) bins[i] -= piece;
+      else bins.push(ROD_STICK - piece);
+      // si un pedazo pasa de 3 m se necesitan varillas extra
+      for (let extra = l - ROD_STICK; extra > 1e-9; extra -= ROD_STICK) bins.push(ROD_STICK - Math.min(extra, ROD_STICK));
+    }
+    const total = lengths.reduce((a, b) => a + b, 0);
+    add(`rod|${rod}`, 'Soportes', `Varilla roscada ${rod}" (tramos de 3 m)`, bins.length, 'varilla', total);
+  }
+
+  const order: BomCategory[] = ['Tubería', 'Accesorios', 'Válvulas', 'Rociadores', 'Soportes'];
   const list = [...items.values()].sort(
     (a, b) => order.indexOf(a.category) - order.indexOf(b.category) || a.description.localeCompare(b.description, 'es', { numeric: true }),
   );

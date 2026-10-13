@@ -8,6 +8,7 @@ export type Selection =
   | { kind: 'pipe'; id: string }
   | { kind: 'sprinkler'; id: string }
   | { kind: 'element'; id: string }
+  | { kind: 'hanger'; id: string }
   | { kind: 'multi'; items: ItemSet }
   | null;
 
@@ -18,6 +19,7 @@ const LIST: Record<SingleKind, keyof ItemSet> = { node: 'nodes', pipe: 'pipes', 
 export function selectionItems(sel: Selection): ItemSet {
   const out: ItemSet = { nodes: [], pipes: [], sprinklers: [], elements: [] };
   if (!sel) return out;
+  if (sel.kind === 'hanger') return out;
   if (sel.kind === 'multi') return { nodes: [...sel.items.nodes], pipes: [...sel.items.pipes], sprinklers: [...sel.items.sprinklers], elements: [...sel.items.elements] };
   out[LIST[sel.kind]].push(sel.id);
   return out;
@@ -34,7 +36,8 @@ export function selectionFrom(items: ItemSet): Selection {
 }
 
 /** Agrega o quita un objeto de la selección */
-export function toggleInSelection(sel: Selection, kind: SingleKind, id: string): Selection {
+export function toggleInSelection(sel: Selection, kind: SingleKind | 'hanger', id: string): Selection {
+  if (kind === 'hanger') return { kind: 'hanger', id };
   const items = selectionItems(sel);
   const list = items[LIST[kind]];
   const i = list.indexOf(id);
@@ -46,6 +49,7 @@ export function toggleInSelection(sel: Selection, kind: SingleKind, id: string):
 export function isSelected(sel: Selection, kind: string, id: string): boolean {
   if (!sel) return false;
   if (sel.kind === 'multi') return (sel.items[LIST[kind as SingleKind]] ?? []).includes(id);
+  if (sel.kind === 'hanger') return kind === 'hanger' && sel.id === id;
   return sel.kind === kind && sel.id === id;
 }
 
@@ -54,7 +58,7 @@ export type Tool = 'select' | 'draw' | 'sprinkler' | 'fill' | 'element' | 'calib
 export type ColorMode = 'material' | 'size' | 'pressure' | 'velocity';
 
 /** Etiquetas en el dibujo: ninguna, nombres (N1, T3, S5 y diámetros) o resultados del cálculo */
-export type LabelMode = 'none' | 'names' | 'results';
+export type LabelMode = 'none' | 'names' | 'results' | 'pieces';
 
 type Listener = (why: ChangeKind) => void;
 export type ChangeKind = 'project' | 'selection' | 'result' | 'tool' | 'view' | 'file';
@@ -194,7 +198,8 @@ class Store {
       (s.kind === 'node' && p.nodes.some((n) => n.id === s.id)) ||
       (s.kind === 'pipe' && p.pipes.some((n) => n.id === s.id)) ||
       (s.kind === 'sprinkler' && p.sprinklers.some((n) => n.id === s.id)) ||
-      (s.kind === 'element' && (p.elements ?? []).some((n) => n.id === s.id));
+      (s.kind === 'element' && (p.elements ?? []).some((n) => n.id === s.id)) ||
+      (s.kind === 'hanger' && (p.hangers ?? []).some((n) => n.id === s.id));
     if (!exists) this.selection = null;
   }
 

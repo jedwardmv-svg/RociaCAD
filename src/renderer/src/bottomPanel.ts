@@ -5,8 +5,9 @@ import { fmt, getMaterial, internalDiameter, ORIENTATION_NAMES, sizeLabel, unitL
 import { clear, h, parseNum } from './dom';
 import { numInput, rerender } from './fields';
 import { isSelected, store, type Selection } from './state';
+import { fabricationTab } from './fabrication';
 
-type TabId = 'pipes' | 'sprinklers' | 'nodes' | 'bom' | 'messages';
+type TabId = 'pipes' | 'sprinklers' | 'nodes' | 'bom' | 'fab' | 'messages';
 let tab: TabId = 'pipes';
 
 export function renderBottom(el: HTMLElement) {
@@ -39,6 +40,7 @@ export function renderBottom(el: HTMLElement) {
         tabBtn('sprinklers', 'Rociadores', store.project.sprinklers.length),
         tabBtn('nodes', 'Nodos', store.project.nodes.length),
         tabBtn('bom', 'Materiales'),
+        tabBtn('fab', 'Fabricación'),
         tabBtn('messages', 'Avisos', msgCount, msgCount > 0),
       ),
       body,
@@ -47,6 +49,7 @@ export function renderBottom(el: HTMLElement) {
     else if (tab === 'sprinklers') sprinklersTable(body);
     else if (tab === 'nodes') nodesTable(body);
     else if (tab === 'bom') bomTable(body);
+    else if (tab === 'fab') fabricationTab(body);
     else messages(body);
   });
   body.scrollTop = prevScroll[0];

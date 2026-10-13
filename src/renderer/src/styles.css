@@ -76,6 +76,59 @@ textarea {
     'st st st';
 }
 
+/* ---------- Pestaña de fabricación ---------- */
+.fab {
+  padding: 4px 12px 16px;
+}
+.fab-section {
+  margin-bottom: 14px;
+}
+.fab-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 0;
+}
+.fab-head h3 {
+  margin: 0 8px 0 0;
+  font-size: 14px;
+}
+.fab-head .input-unit {
+  width: 120px;
+}
+.fab-head select {
+  width: auto;
+  height: 28px;
+}
+.fab-field {
+  margin-left: 8px;
+  color: var(--muted);
+  font-size: 12px;
+}
+.fab-cols {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+.fab .grid.compact {
+  margin-bottom: 10px;
+}
+.fab .pieces tbody tr {
+  cursor: pointer;
+}
+.fab .pieces tbody tr:hover {
+  background: var(--hover);
+}
+.fab .bad-row td {
+  color: var(--fire);
+}
+.label.pipe.bad {
+  background: rgba(200, 16, 46, 0.9);
+  color: #fff;
+}
+
 /* ---------- Paneles que se ocultan ---------- */
 #app.left-hidden {
   --left-w: 0px;

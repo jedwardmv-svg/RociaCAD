@@ -52,6 +52,7 @@ import { editHooks, renderInspector } from './inspector';
 import { designHooks, renderLeft } from './leftPanel';
 import { buildReport } from './report';
 import { planHooks } from './planPanel';
+import { buildFabricationSheet, fabricationHooks } from './fabrication';
 import { initPanels, togglePanel, toggleAllPanels } from './panels';
 import { selectionFrom, store, toggleInSelection, type ColorMode, type LabelMode, type Tool } from './state';
 import { createUnderlay, loadAsset, pickPlanFile, setMaxTexture, type UnderlayAsset } from './underlay';
@@ -174,6 +175,7 @@ function renderToolbar() {
       { value: 'none', label: 'Sin etiquetas' },
       { value: 'names', label: 'Etiquetas: nombres' },
       { value: 'results', label: 'Etiquetas: resultados' },
+      { value: 'pieces', label: 'Etiquetas: piezas de corte' },
     ],
     'label-mode',
     (v) => {
@@ -1293,6 +1295,24 @@ const actions = {
       download(new Blob([content], { type: 'image/vnd.dxf' }), `${fileBaseName()}.dxf`);
     }
   },
+  async exportCsv(content: string, name: string) {
+    if (desktop) {
+      const r = await desktop.saveFile({ content, suggestedName: `${name} - ${fileBaseName()}`, kind: 'csv' });
+      if (r) flash('Archivo CSV guardado');
+    } else {
+      download(new Blob([content], { type: 'text/csv;charset=utf-8' }), `${name} - ${fileBaseName()}.csv`);
+    }
+  },
+  async exportFabrication() {
+    buildFabricationSheet($('print-root'), appVersion);
+    await document.fonts.ready;
+    if (desktop) {
+      const r = await desktop.exportPdf({ suggestedName: `Hoja de fabricación - ${fileBaseName()}` });
+      if (r) flash('Hoja de fabricación guardada');
+    } else {
+      window.print();
+    }
+  },
   async exportPdf() {
     store.recalcNow();
     const image = viewer.snapshot();
@@ -1327,6 +1347,11 @@ function deleteSelection() {
   if (!s) return;
   if (s.kind === 'multi') {
     store.mutate((p) => deleteItems(p, s.items));
+    store.select(null);
+    return;
+  }
+  if (s.kind === 'hanger') {
+    store.mutate((p) => (p.hangers = (p.hangers ?? []).filter((x) => x.id !== s.id)));
     store.select(null);
     return;
   }
@@ -1524,6 +1549,8 @@ async function start() {
     /* sin WebGL */
   }
   initPanels($('stage'));
+  fabricationHooks.saveCsv = (content, name) => actions.exportCsv(content, name);
+  fabricationHooks.printSheet = () => actions.exportFabrication();
   // la app abre con un proyecto en blanco; los ejemplos están en Archivo → Ejemplos
   store.load(emptyProject());
   // Acceso para pruebas automáticas (solo si se abre con #debug)
