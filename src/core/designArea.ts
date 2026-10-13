@@ -11,6 +11,7 @@
  */
 import { calculate, type CalcResult } from './calculate';
 import type { Project } from './model';
+import { effectiveDesignArea } from './systemType';
 
 const FT_TOL = 0.75; // tolerancia para considerar dos rociadores en la misma línea (ft)
 
@@ -130,7 +131,7 @@ export interface AreaRule {
 
 /** Lo que pide la norma para este proyecto */
 export function areaRule(p: Project, lines = sprinklerLines(p)): AreaRule {
-  const area = p.criteria.area;
+  const area = effectiveDesignArea(p);
   const coverage = p.sprinklers.length ? median(p.sprinklers.map((s) => s.coverage)) : NaN;
   const count = Number.isFinite(coverage) && coverage > 0 ? Math.max(1, Math.ceil(area / coverage - 1e-9)) : 0;
   const minParallel = 1.2 * Math.sqrt(area);

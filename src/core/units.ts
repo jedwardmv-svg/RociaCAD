@@ -28,6 +28,8 @@ export const CONV = {
   K_US_TO_SI: 14.4,
   /** 1 ft/s en m/s */
   FPS_TO_MPS: 0.3048,
+  /** 1 galón US en litros */
+  GAL_TO_L: 3.785411784,
 } as const;
 
 /** Presión de una columna de agua: psi por cada pie de altura. */
@@ -52,6 +54,7 @@ export const QUANTITIES = {
   density: { us: 'gpm/ft²', metric: 'mm/min', factor: CONV.DENSITY_US_TO_SI, digits: { us: 3, metric: 2 } },
   kfactor: { us: 'gpm/psi½', metric: 'L/min/bar½', factor: CONV.K_US_TO_SI, digits: { us: 1, metric: 0 } },
   velocity: { us: 'ft/s', metric: 'm/s', factor: CONV.FPS_TO_MPS, digits: { us: 1, metric: 2 } },
+  volume: { us: 'gal', metric: 'L', factor: CONV.GAL_TO_L, digits: { us: 0, metric: 0 } },
   frictionRate: { us: 'psi/ft', metric: 'bar/m', factor: CONV.PSI_TO_BAR / CONV.FT_TO_M, digits: { us: 4, metric: 4 } },
 } satisfies Record<string, QuantityDef>;
 

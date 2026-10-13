@@ -113,6 +113,34 @@ export interface DesignCriteria {
   maxVelocity: number;
   /** psi; margen mínimo exigido entre suministro y demanda */
   minSafetyMargin: number;
+  /** tipo de sistema (por omisión, húmedo) */
+  systemType?: SystemType;
+  /** sistema seco con acelerador o dispositivo de apertura rápida (QOD) */
+  quickOpening?: boolean;
+}
+
+export type SystemType = 'wet' | 'dry' | 'preaction-single' | 'preaction-double';
+
+export const SYSTEM_TYPE_NAMES: Record<SystemType, string> = {
+  wet: 'Húmedo',
+  dry: 'Seco',
+  'preaction-single': 'Preacción de enclavamiento sencillo',
+  'preaction-double': 'Preacción de doble enclavamiento',
+};
+
+/** Bomba contra incendio (NFPA 20): curva por tres puntos */
+export interface FirePump {
+  enabled: boolean;
+  /** caudal nominal, gpm */
+  ratedFlow: number;
+  /** presión neta nominal, psi */
+  ratedPressure: number;
+  /** presión a caudal cero, en % de la nominal (NFPA 20: máximo 140 %) */
+  churnPct: number;
+  /** presión al 150 % del caudal, en % de la nominal (NFPA 20: mínimo 65 %) */
+  at150Pct: number;
+  /** marca y modelo (informativo) */
+  model?: string;
 }
 
 export interface WaterSupply {
@@ -124,6 +152,13 @@ export interface WaterSupply {
   residualPressure: number;
   /** gpm medido a la presión residual */
   residualFlow: number;
+  /** de dónde viene el agua: prueba de hidrante (red pública) o tanque */
+  source?: 'hydrant' | 'tank';
+  /** tanque: altura del nivel del agua sobre el punto de suministro (ft; negativa si está más abajo) */
+  tankHeadFt?: number;
+  /** tanque: volumen útil (gal) */
+  tankVolume?: number;
+  pump?: FirePump;
 }
 
 /**
@@ -229,9 +264,16 @@ export function validateProject(p: Project): string[] {
     if (!(s.k > 0)) errors.push(`El rociador ${s.id} tiene un factor K inválido`);
   }
   if (!nodeIds.has(p.supply.nodeId)) errors.push('El punto de suministro no corresponde a ningún nodo');
-  if (p.supply.residualPressure >= p.supply.staticPressure)
-    errors.push('La presión residual del suministro debe ser menor que la estática');
-  if (!(p.supply.residualFlow > 0)) errors.push('El caudal de la prueba de suministro debe ser mayor que cero');
+  if (p.supply.source !== 'tank') {
+    if (p.supply.residualPressure >= p.supply.staticPressure)
+      errors.push('La presión residual del suministro debe ser menor que la estática');
+    if (!(p.supply.residualFlow > 0)) errors.push('El caudal de la prueba de suministro debe ser mayor que cero');
+  }
+  const pump = p.supply.pump;
+  if (pump?.enabled) {
+    if (!(pump.ratedFlow > 0)) errors.push('El caudal nominal de la bomba debe ser mayor que cero');
+    if (!(pump.ratedPressure > 0)) errors.push('La presión nominal de la bomba debe ser mayor que cero');
+  }
   return errors;
 }
 

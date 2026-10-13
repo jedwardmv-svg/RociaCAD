@@ -23,6 +23,8 @@ export interface SprinklerModel {
   maxCoverage?: number;
   /** presión mínima según su listado (psi) */
   minPressure?: number;
+  /** rociador de tipo seco (colgante o de pared seco), apto para sistemas secos */
+  dry?: boolean;
   builtIn?: boolean;
 }
 
@@ -77,6 +79,8 @@ export const BUILTIN_SPRINKLERS: SprinklerModel[] = ([
   { id: 'gen-k56-up', name: 'Genérico K5.6 montante', k: 5.6, orientation: 'upright', temperatureC: 68 },
   { id: 'gen-k56-side', name: 'Genérico K5.6 de pared', k: 5.6, orientation: 'sidewall', temperatureC: 68 },
   { id: 'gen-k56-conc', name: 'Genérico K5.6 oculto', k: 5.6, orientation: 'concealed', temperatureC: 68 },
+  { id: 'gen-k56-dry-pend', name: 'Genérico K5.6 colgante seco', k: 5.6, orientation: 'pendent', temperatureC: 68, dry: true },
+  { id: 'gen-k56-dry-side', name: 'Genérico K5.6 de pared seco', k: 5.6, orientation: 'sidewall', temperatureC: 68, dry: true },
   { id: 'gen-k80-pend', name: 'Genérico K8.0 colgante', k: 8.0, orientation: 'pendent', temperatureC: 68 },
   { id: 'gen-k80-up', name: 'Genérico K8.0 montante', k: 8.0, orientation: 'upright', temperatureC: 68 },
   { id: 'gen-k112-pend', name: 'Genérico K11.2 colgante', k: 11.2, orientation: 'pendent', temperatureC: 68 },

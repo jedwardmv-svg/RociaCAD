@@ -3,6 +3,7 @@
  */
 import {
   addDropWithSprinkler,
+  effectiveC,
   closeItems,
   deleteItems,
   itemCount,
@@ -171,7 +172,16 @@ function pipePanel(id: string): HTMLElement {
         'pipe-role',
         (v) => set((pp) => (pp.role = v)),
       ),
-      numField({ label: 'Coeficiente C', value: pipe.c, key: 'pipe-c', min: 1, digits: 0, onCommit: (v) => set((pp) => (pp.c = v)) }),
+      numField({
+        label: 'Coeficiente C',
+        value: pipe.c,
+        key: 'pipe-c',
+        min: 1,
+        digits: 0,
+        hint: effectiveC(store.project, pipe) !== pipe.c ? `En este tipo de sistema el acero se calcula con C = ${effectiveC(store.project, pipe)}` : '',
+        onCommit: (v) => set((pp) => (pp.c = v)),
+      }),
+      effectiveC(store.project, pipe) !== pipe.c ? h('p', { class: 'auto-fittings' }, `Se calcula con C = ${effectiveC(store.project, pipe)} (sistema seco o de preacción).`) : null,
       numField({
         label: 'Diámetro interno',
         q: 'diameter',

@@ -254,6 +254,12 @@ function form(item: AnyItem): HTMLElement {
           ? h('span', null, s.response === 'standard' ? 'Estándar' : 'Rápida')
           : selectInput<'quick' | 'standard'>('Respuesta', s.response ?? 'quick', [{ value: 'quick', label: 'Rápida' }, { value: 'standard', label: 'Estándar' }], `cat-resp-${s.id}`, (v) => up({ response: v } as Partial<SprinklerModel>)),
       ),
+      row(
+        'Tipo seco',
+        ro
+          ? h('span', null, s.dry ? 'Sí' : 'No')
+          : selectInput<'no' | 'yes'>('Tipo seco', s.dry ? 'yes' : 'no', [{ value: 'no', label: 'No' }, { value: 'yes', label: 'Sí (colgante o de pared seco)' }], `cat-dry-${s.id}`, (v) => up({ dry: v === 'yes' } as Partial<SprinklerModel>)),
+      ),
       row('Cobertura máxima', numInput({ disabled: ro, label: 'Cobertura máxima', q: 'area', value: s.maxCoverage, allowEmpty: true, placeholder: 'según riesgo', key: `cat-cov-${s.id}`, onCommit: (v) => !ro && up({ maxCoverage: v } as Partial<SprinklerModel>), onClear: () => !ro && up({ maxCoverage: undefined } as Partial<SprinklerModel>) })),
       row('Presión mínima', numInput({ disabled: ro, label: 'Presión mínima', q: 'pressure', value: s.minPressure, allowEmpty: true, placeholder: 'según criterio', key: `cat-minp-${s.id}`, onCommit: (v) => !ro && up({ minPressure: v } as Partial<SprinklerModel>), onClear: () => !ro && up({ minPressure: undefined } as Partial<SprinklerModel>) })),
       h('p', { class: 'muted-text' }, 'La presión mínima y la cobertura máxima de la hoja técnica se usan en el cálculo y en los avisos.'),

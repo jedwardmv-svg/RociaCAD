@@ -15,7 +15,9 @@ import { getSprinklerModel } from './catalog';
 import { autoFittings } from './autoFittings';
 import { equivalentLength, FITTING_NAMES } from './fittings';
 import { HAZARDS } from './hazards';
-import { frictionLossPerFt, pipeResistance, supplyFlowAt, supplyPressureAt, velocity } from './hydraulics';
+import { frictionLossPerFt, pipeResistance, velocity } from './hydraulics';
+import { availableFlowAt, availablePressureAt, pumpNetPressure, sourcePressureAt } from './supply';
+import { checkSystem, effectiveC, effectiveDesignArea } from './systemType';
 import type { FittingEntry, Pipe, Project } from './model';
 import { validateProject } from './model';
 import { connectedFrom, solveNetwork, type NetNode, type NetPipe, type NetResult } from './network';
@@ -69,6 +71,7 @@ export interface SprinklerResult {
 }
 
 export interface SupplyCheck {
+  source: 'hydrant' | 'tank';
   staticPressure: number;
   residualPressure: number;
   residualFlow: number;
@@ -76,13 +79,26 @@ export interface SupplyCheck {
   demandFlow: number;
   /** presión requerida en el punto de suministro, psi */
   demandPressure: number;
-  /** presión que da el suministro con ese caudal, psi */
+  /** presión que da el suministro con ese caudal (fuente + bomba), psi */
   availablePressure: number;
+  /** presión de la fuente sola (red o tanque) con ese caudal, psi */
+  sourcePressure: number;
   margin: number;
   minMargin: number;
   pass: boolean;
   /** caudal máximo que el suministro puede dar a la presión requerida */
   availableFlowAtDemandPressure: number;
+  pump?: {
+    ratedFlow: number;
+    ratedPressure: number;
+    churnPressure: number;
+    at150Pressure: number;
+    /** presión neta de la bomba con el caudal de la demanda */
+    pressureAtDemand: number;
+    /** caudal de la demanda en % del nominal */
+    percentOfRated: number;
+  };
+  tank?: { headFt: number; volume?: number; requiredVolume: number };
 }
 
 export interface CalcResult {
@@ -107,6 +123,8 @@ export interface CalcResult {
     suggestedCount: number;
   };
   solver: { evaluations: number; iterations: number; converged: boolean; maxResidual: number };
+  /** notas informativas (no son problemas) */
+  notes?: string[];
 }
 
 function emptyResult(errors: string[]): CalcResult {
@@ -135,8 +153,9 @@ export function pipeGeometry(project: Project, pipe: Pipe, auto?: FittingEntry[]
   const lengthFt = pipe.lengthOverride ?? dist;
   const idIn = pipe.idOverride ?? internalDiameter(pipe.material, pipe.size, project) ?? NaN;
   let fittingFt = 0;
-  for (const f of pipe.fittings) fittingFt += f.count * equivalentLength(f.type, pipe.size, pipe.c, idIn);
-  for (const f of auto ?? []) fittingFt += f.count * equivalentLength(f.type, pipe.size, pipe.c, idIn);
+  const c = effectiveC(project, pipe);
+  for (const f of pipe.fittings) fittingFt += f.count * equivalentLength(f.type, pipe.size, c, idIn);
+  for (const f of auto ?? []) fittingFt += f.count * equivalentLength(f.type, pipe.size, c, idIn);
   return { lengthFt, fittingFt, totalFt: lengthFt + fittingFt, idIn };
 }
 
@@ -181,7 +200,7 @@ export function calculate(project: Project): CalcResult {
 
   const allPipes: NetPipe[] = project.pipes.map((p) => {
     const g = geom.get(p.id)!;
-    return { a: index.get(p.from)!, b: index.get(p.to)!, r: pipeResistance(g.totalFt, p.c, g.idIn) };
+    return { a: index.get(p.from)!, b: index.get(p.to)!, r: pipeResistance(g.totalFt, effectiveC(project, p), g.idIn) };
   });
   const reach = connectedFrom(project.nodes.length, allPipes, source);
 
@@ -314,7 +333,8 @@ export function calculate(project: Project): CalcResult {
     const zUp = project.nodes[index.get(up)!].z;
     const zDown = project.nodes[index.get(down)!].z;
     const v = velocity(q, g.idIn);
-    const fpf = frictionLossPerFt(q, p.c, g.idIn);
+    const cEff = effectiveC(project, p);
+    const fpf = frictionLossPerFt(q, cEff, g.idIn);
     pipes[p.id] = {
       id: p.id,
       ...g,
@@ -327,7 +347,7 @@ export function calculate(project: Project): CalcResult {
       frictionPerFt: fpf,
       frictionLoss: fpf * g.totalFt,
       elevationLoss: PSI_PER_FT_WATER * (zDown - zUp),
-      c: p.c,
+      c: cEff,
       fittingsText: fittingsText(p, auto.get(p.id)),
     };
     if (v > maxVel) warnings.push(`Velocidad alta en el tubo ${p.id}: ${v.toFixed(1)} ft/s (límite ${maxVel} ft/s)`);
@@ -371,21 +391,38 @@ export function calculate(project: Project): CalcResult {
   const requiredPressure = ps;
   const totalFlow = res.sourceFlow + crit.hoseAllowance;
 
-  // --- Comparación con el suministro
+  // --- Comparación con el suministro (red pública o tanque, más la bomba si la hay)
   const sup = project.supply;
-  const available = supplyPressureAt(totalFlow, sup.staticPressure, sup.residualPressure, sup.residualFlow);
+  const available = availablePressureAt(sup, totalFlow);
   const margin = available - requiredPressure;
+  const pump = sup.pump?.enabled ? sup.pump : undefined;
   const supply: SupplyCheck = {
+    source: sup.source ?? 'hydrant',
     staticPressure: sup.staticPressure,
     residualPressure: sup.residualPressure,
     residualFlow: sup.residualFlow,
     demandFlow: totalFlow,
     demandPressure: requiredPressure,
     availablePressure: available,
+    sourcePressure: sourcePressureAt(sup, totalFlow),
     margin,
     minMargin: crit.minSafetyMargin,
     pass: margin >= crit.minSafetyMargin,
-    availableFlowAtDemandPressure: supplyFlowAt(requiredPressure, sup.staticPressure, sup.residualPressure, sup.residualFlow),
+    availableFlowAtDemandPressure: availableFlowAt(sup, requiredPressure),
+    pump: pump
+      ? {
+          ratedFlow: pump.ratedFlow,
+          ratedPressure: pump.ratedPressure,
+          churnPressure: (pump.churnPct / 100) * pump.ratedPressure,
+          at150Pressure: (pump.at150Pct / 100) * pump.ratedPressure,
+          pressureAtDemand: pumpNetPressure(pump, totalFlow),
+          percentOfRated: (100 * totalFlow) / pump.ratedFlow,
+        }
+      : undefined,
+    tank:
+      sup.source === 'tank'
+        ? { headFt: sup.tankHeadFt ?? 0, volume: sup.tankVolume, requiredVolume: totalFlow * crit.duration }
+        : undefined,
   };
   if (!supply.pass) {
     warnings.push(
@@ -394,6 +431,30 @@ export function calculate(project: Project): CalcResult {
         : `El margen de seguridad (${margin.toFixed(2)} psi) es menor que el mínimo exigido (${crit.minSafetyMargin} psi).`,
     );
   }
+  if (pump) {
+    if (pump.churnPct > 140) warnings.push('NFPA 20: la presión de la bomba a caudal cero no debe pasar del 140 % de la nominal.');
+    if (pump.at150Pct < 65) warnings.push('NFPA 20: al 150 % del caudal la bomba debe dar al menos el 65 % de la presión nominal.');
+    if (totalFlow > 1.5 * pump.ratedFlow)
+      warnings.push(`La demanda (${totalFlow.toFixed(0)} gpm) pasa del 150 % del caudal nominal de la bomba (${pump.ratedFlow} gpm): elija una bomba más grande.`);
+    const suction = supply.sourcePressure;
+    if (sup.source !== 'tank' && suction < 20)
+      warnings.push(
+        `Con la demanda, la presión de la red en la succión de la bomba baja a ${suction.toFixed(1)} psi. Muchas empresas de acueducto exigen no bajar de 20 psi.`,
+      );
+    if (sup.source === 'tank' && (sup.tankHeadFt ?? 0) < 0)
+      warnings.push('El nivel del agua del tanque queda por debajo de la bomba: NFPA 20 pide que las bombas horizontales tengan succión positiva; con el agua más abajo se usa bomba de turbina vertical.');
+  }
+  if (supply.tank) {
+    if (supply.tank.volume === undefined || !(supply.tank.volume > 0))
+      warnings.push(`Indique el volumen del tanque: con la demanda se necesitan ${supply.tank.requiredVolume.toFixed(0)} gal (${crit.duration} min).`);
+    else if (supply.tank.volume < supply.tank.requiredVolume)
+      warnings.push(
+        `El tanque (${supply.tank.volume.toFixed(0)} gal) no alcanza para ${crit.duration} min: se necesitan ${supply.tank.requiredVolume.toFixed(0)} gal.`,
+      );
+  }
+  const sys = checkSystem(project);
+  warnings.push(...sys.warnings);
+  const notes = [...sys.notes];
 
   // --- Revisión del área de diseño
   let totalCoverage = 0;
@@ -401,10 +462,11 @@ export function calculate(project: Project): CalcResult {
   for (const s of design) totalCoverage += s.coverage;
   for (const s of project.sprinklers) coverageSum += s.coverage;
   const avgCov = project.sprinklers.length ? coverageSum / project.sprinklers.length : 0;
-  const suggestedCount = avgCov > 0 ? Math.ceil(crit.area / avgCov) : 0;
-  if (totalCoverage + 1e-6 < crit.area) {
+  const designAreaFt2 = effectiveDesignArea(project);
+  const suggestedCount = avgCov > 0 ? Math.ceil(designAreaFt2 / avgCov - 1e-9) : 0;
+  if (totalCoverage + 1e-6 < designAreaFt2) {
     warnings.push(
-      `El área cubierta por los rociadores abiertos (${totalCoverage.toFixed(0)} ft²) es menor que el área de diseño (${crit.area.toFixed(0)} ft²). ` +
+      `El área cubierta por los rociadores abiertos (${totalCoverage.toFixed(0)} ft²) es menor que el área de diseño (${designAreaFt2.toFixed(0)} ft²). ` +
         `Con la cobertura promedio se necesitan unos ${suggestedCount} rociadores abiertos.`,
     );
   }
@@ -438,7 +500,8 @@ export function calculate(project: Project): CalcResult {
     nodes,
     pipes,
     sprinklers,
-    designArea: { flowingCount: design.length, totalCoverage, requiredArea: crit.area, suggestedCount },
+    designArea: { flowingCount: design.length, totalCoverage, requiredArea: designAreaFt2, suggestedCount },
+    notes,
     solver: { evaluations, iterations, converged: res.converged, maxResidual: res.maxResidual },
   };
 }

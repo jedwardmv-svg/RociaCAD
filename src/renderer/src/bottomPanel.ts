@@ -102,7 +102,7 @@ function pipesTable(el: HTMLElement) {
         pr ? (flowing ? `${pr.upstream} a ${pr.downstream}` : `${p.from} a ${p.to} (sin flujo)`) : `${p.from} a ${p.to}`,
         sizeLabel(p.size, metric),
         fmt('diameter', idIn, u),
-        String(p.c),
+        String(pr ? pr.c : p.c),
         pr ? fmt('flow', Math.abs(pr.flow), u) : '—',
         pr ? fmt('length', pr.lengthFt, u) : '—',
         pr ? fmt('length', pr.fittingFt, u) : '—',
@@ -350,7 +350,9 @@ function messages(el: HTMLElement) {
     ...r.errors.map((e) => h('li', { class: 'err' }, e)),
     ...r.warnings.map((w) => h('li', null, w)),
   ];
+  const notes = (r.notes ?? []).map((n) => h('li', { class: 'ok' }, n));
   if (!items.length) items.push(h('li', { class: 'ok' }, 'Sin avisos. El cálculo cumple los criterios revisados.'));
+  items.push(...notes);
   if (r.ok)
     items.push(
       h(

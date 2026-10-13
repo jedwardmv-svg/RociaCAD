@@ -2,7 +2,7 @@
  * Reporte de cálculo hidráulico para imprimir o exportar a PDF.
  * Se arma dentro de #print-root; los estilos de impresión ocultan la app y muestran solo esto.
  */
-import { checkDesignArea, fmt, getMaterial, HAZARD_NAMES, internalDiameter, ORIENTATION_NAMES, sizeLabel, unitLabel, type Quantity } from '../../core';
+import { checkDesignArea, checkSystem, effectiveDesignArea, fmt, SYSTEM_TYPE_NAMES, getMaterial, HAZARD_NAMES, internalDiameter, ORIENTATION_NAMES, sizeLabel, unitLabel, type Quantity } from '../../core';
 import { clear, h } from './dom';
 import { store } from './state';
 import { supplyChartSvg } from './supplyChart';
@@ -33,8 +33,12 @@ export function buildReport(root: HTMLElement, opts: { image?: string; planImage
   const c = p.criteria;
   const criteria = kv([
     ['Clasificación', HAZARD_NAMES[c.hazard]],
+    ['Tipo de sistema', SYSTEM_TYPE_NAMES[c.systemType ?? 'wet']],
     ['Densidad', fmt('density', c.density, u, true)],
-    ['Área de diseño', fmt('area', c.area, u, true)],
+    [
+      'Área de diseño',
+      effectiveDesignArea(p) > c.area + 1e-9 ? `${fmt('area', c.area, u, true)} + 30 % = ${fmt('area', effectiveDesignArea(p), u, true)}` : fmt('area', c.area, u, true),
+    ],
     ['Asignación de mangueras', fmt('flow', c.hoseAllowance, u, true)],
     ['Presión mínima por rociador', fmt('pressure', c.minSprinklerPressure, u, true)],
     ['Duración', `${c.duration} min`],
@@ -47,7 +51,7 @@ export function buildReport(root: HTMLElement, opts: { image?: string; planImage
   } else {
     const s = r.supply!;
     const chart = h('div', { class: 'r-chart' });
-    chart.innerHTML = supplyChartSvg(r, u, 380, 250);
+    chart.innerHTML = supplyChartSvg(r, u, 380, 250, {}, p.supply);
     parts.push(
       h(
         'section',
@@ -68,7 +72,24 @@ export function buildReport(root: HTMLElement, opts: { image?: string; planImage
               ['Presión requerida en el suministro', fmt('pressure', s.demandPressure, u, true)],
               ['Presión disponible con ese caudal', fmt('pressure', s.availablePressure, u, true)],
               ['Margen de seguridad', `${fmt('pressure', s.margin, u, true)} (mínimo exigido ${fmt('pressure', s.minMargin, u, true)})`],
-              ['Prueba de suministro', `estática ${fmt('pressure', s.staticPressure, u, true)}, residual ${fmt('pressure', s.residualPressure, u, true)} con ${fmt('flow', s.residualFlow, u, true)}`],
+              s.source === 'tank'
+                ? ['Tanque', `nivel del agua ${fmt('length', s.tank!.headFt, u, true)} sobre el suministro; volumen ${s.tank!.volume ? fmt('volume', s.tank!.volume, u, true) : 'sin indicar'}, se necesitan ${fmt('volume', s.tank!.requiredVolume, u, true)}`]
+                : ['Prueba de suministro', `estática ${fmt('pressure', s.staticPressure, u, true)}, residual ${fmt('pressure', s.residualPressure, u, true)} con ${fmt('flow', s.residualFlow, u, true)}`],
+              ...((s.pump
+                ? [
+                    [
+                      'Bomba contra incendio',
+                      `${p.supply.pump?.model ? `${p.supply.pump.model}: ` : ''}${fmt('flow', s.pump.ratedFlow, u, true)} a ${fmt('pressure', s.pump.ratedPressure, u, true)}; a caudal cero ${fmt('pressure', s.pump.churnPressure, u, true)}, al 150 % ${fmt('pressure', s.pump.at150Pressure, u, true)}`,
+                    ],
+                    ['Punto de trabajo de la bomba', `${s.pump.percentOfRated.toFixed(0)} % del caudal nominal, ${fmt('pressure', s.pump.pressureAtDemand, u, true)}; ${s.source === 'tank' ? 'tanque' : 'succión'} ${fmt('pressure', s.sourcePressure, u, true)}`],
+                  ]
+                : []) as [string, string][]),
+              ...((() => {
+                const sys = checkSystem(p);
+                return sys.volume !== undefined
+                  ? [['Volumen de la parte seca', `${fmt('volume', sys.volume, u, true)} (límite sin cálculo de tiempo de entrega: ${fmt('volume', sys.volumeLimit!, u, true)}; tiempo exigido ${sys.deliveryTime} s)`]]
+                  : [];
+              })() as [string, string][]),
             ]),
           ),
           chart,
@@ -135,7 +156,7 @@ export function buildReport(root: HTMLElement, opts: { image?: string; planImage
             `${pr.downstream} – ${pr.upstream}`,
             sizeLabel(pp.size, metric),
             fmt('diameter', pp.idOverride ?? internalDiameter(pp.material, pp.size, p) ?? NaN, u),
-            String(pp.c),
+            String(pr.c),
             fmt('flow', Math.abs(pr.flow), u),
             fmt('length', pr.lengthFt, u),
             fmt('length', pr.fittingFt, u),
@@ -163,6 +184,7 @@ export function buildReport(root: HTMLElement, opts: { image?: string; planImage
     );
 
     if (r.warnings.length) parts.push(h('section', null, h('h2', null, 'Avisos'), h('ul', null, r.warnings.map((w) => h('li', null, w)))));
+    if (r.notes?.length) parts.push(h('section', null, h('h2', null, 'Notas'), h('ul', null, r.notes.map((w) => h('li', null, w)))));
   }
 
   // Materiales
