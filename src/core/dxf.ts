@@ -714,10 +714,19 @@ export function buildPlan(entities: AnyEntity[], blocks: PlanBlocks, insUnits: n
       const L = Math.hypot(d.x, d.y, d.z);
       if (!(L > 0)) continue;
       const tol = L * 1e-6 + 1e-9;
+      const u = { x: d.x / L, y: d.y / L, z: d.z / L };
       const at = (c: V3, pt: Pt) => Math.abs(c.x - pt.x) <= tol && Math.abs(c.y - pt.y) <= tol && Math.abs(c.z - (pt.z ?? 0)) <= tol;
-      const hit = circles.find(
-        (k) => (at(k.c, p) || at(k.c, q)) && Math.abs((k.n.x * d.x + k.n.y * d.y + k.n.z * d.z) / L) > 0.999 && k.r < L * 2,
-      );
+      // el círculo sobre el eje del tubo: en un extremo o, a veces, más adelante sobre la misma recta
+      const onAxis = (c: V3) => {
+        const w = { x: c.x - p.x, y: c.y - p.y, z: c.z - (p.z ?? 0) };
+        const t = w.x * u.x + w.y * u.y + w.z * u.z;
+        const off = Math.hypot(w.x - t * u.x, w.y - t * u.y, w.z - t * u.z);
+        return off <= Math.max(tol, 1e-6) && t >= -L && t <= 2 * L;
+      };
+      const parallel = (k: { n: V3 }) => Math.abs(k.n.x * u.x + k.n.y * u.y + k.n.z * u.z) > 0.999;
+      const hit =
+        circles.find((k) => (at(k.c, p) || at(k.c, q)) && parallel(k) && k.r < L * 2) ??
+        circles.find((k) => parallel(k) && k.r < L * 2 && onAxis(k.c));
       if (!hit) continue;
       // el mismo eje suele venir dos veces (con y sin grosor de línea): un solo tubo
       const key = [p.x, p.y, p.z ?? 0, q.x, q.y, q.z ?? 0].map((x) => x.toFixed(6)).join(',');

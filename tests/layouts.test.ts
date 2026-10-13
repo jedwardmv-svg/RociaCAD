@@ -192,6 +192,19 @@ describe('Tubos y textos de AutoSPRINK', () => {
     expect(plan.layers.find((l) => l.name === 'PLANTA')!.fills.length).toBe(0);
   });
 
+  it('también reconoce el círculo cuando está sobre el eje pero fuera del extremo', () => {
+    // así viene un tramo del plano 858: el círculo del diámetro 2,6 m antes del inicio del eje
+    const plan = buildPlan(
+      [
+        { type: 'LINE', layer: 'TUBO', vertices: [{ x: -44, y: -56.44, z: 4.5 }, { x: -34.1, y: -56.44, z: 4.5 }] },
+        { type: 'CIRCLE', layer: 'TUBO', center: { x: -56.44, y: 4.5, z: -46.6 }, radius: 0.084, extrusion: { x: 1, y: 0, z: 0 } },
+      ],
+      {},
+      6,
+    );
+    expect(plan.layers[0].fills.length / 9).toBe(24);
+  });
+
   it('un texto centrado ocupa el ancho que dice el archivo', () => {
     // AutoCAD guarda el inicio real (0,0) y el centro (4,0): el texto mide 8 de ancho
     const plan = buildPlan([{ type: 'TEXT', layer: 'T', text: 'Diameter', startPoint: { x: 0, y: 0 }, endPoint: { x: 4, y: 0.5 }, textHeight: 1, halign: 1, valign: 2 }], {}, 6);
