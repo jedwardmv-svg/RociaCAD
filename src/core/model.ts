@@ -193,6 +193,8 @@ export interface Underlay {
   hiddenLayers?: string[];
   /** true cuando el usuario ya confirmó o calibró la escala */
   calibrated: boolean;
+  /** aviso si las unidades del archivo se corrigieron al cargarlo */
+  unitsNote?: string;
 }
 
 /** DXF y DWG son dibujos de líneas (capas, ajuste del cursor); PDF e imagen son fotos */

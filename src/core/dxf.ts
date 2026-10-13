@@ -36,6 +36,25 @@ export const INSUNITS_FT: Record<number, { name: string; ft: number }> = {
   6: { name: 'metros', ft: 1 / 0.3048 },
 };
 
+/**
+ * Escala razonable para un plano: muchos archivos traen mal declaradas las unidades
+ * (por ejemplo, dibujado en metros pero marcado en milímetros). Si con las unidades declaradas
+ * el dibujo mediría menos de 1 m o más de 9 km, se prueba con metros, milímetros, centímetros,
+ * pies y pulgadas y se toma la primera que da un tamaño de edificio.
+ */
+export function plausibleScale(spanUnits: number, declaredFt?: number): { ft: number; code?: number; corrected: boolean } {
+  const ok = (ft: number) => spanUnits * ft >= 3.3 && spanUnits * ft <= 30000;
+  if (declaredFt && ok(declaredFt)) return { ft: declaredFt, corrected: false };
+  // sin unidades: un dibujo de más de 2000 unidades de ancho casi siempre está en mm
+  const order = declaredFt ? [6, 4, 5, 2, 1] : spanUnits > 2000 ? [4, 6, 5, 2, 1] : [6, 4, 5, 2, 1];
+  for (const code of order) {
+    // tamaño de edificio: entre 3 m y 3 km
+    const ft = INSUNITS_FT[code].ft;
+    if (spanUnits * ft >= 10 && spanUnits * ft <= 10000) return { ft, code, corrected: !!declaredFt };
+  }
+  return { ft: declaredFt ?? INSUNITS_FT[6].ft, corrected: false };
+}
+
 type Pt = { x: number; y: number };
 /** Transformación afín 2D: x' = a x + c y + e ; y' = b x + d y + f */
 type Mat = [number, number, number, number, number, number];

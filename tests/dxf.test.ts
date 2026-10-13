@@ -70,3 +70,19 @@ describe('Planos DXF', () => {
     expect(() => parseDxf(dxf({ entities: [] }))).toThrow(/no tiene líneas/);
   });
 });
+
+describe('Unidades mal declaradas', () => {
+  it('un plano en metros marcado como milímetros se toma en metros', async () => {
+    const { plausibleScale, INSUNITS_FT } = await import('../src/core');
+    // 60 unidades de ancho declaradas en mm = 6 cm: no es un edificio
+    const r = plausibleScale(60, INSUNITS_FT[4].ft);
+    expect(r.corrected).toBe(true);
+    expect(r.code).toBe(6);
+    // un detalle de 3 m en mm se respeta
+    expect(plausibleScale(3000, INSUNITS_FT[4].ft).corrected).toBe(false);
+    // un edificio de 360 m en metros se respeta
+    expect(plausibleScale(360, INSUNITS_FT[6].ft).corrected).toBe(false);
+    // sin unidades y 60 000 unidades: milímetros
+    expect(plausibleScale(60000).code).toBe(4);
+  });
+});

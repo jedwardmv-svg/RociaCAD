@@ -3,7 +3,7 @@
  */
 import * as pdfjs from 'pdfjs-dist';
 import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
-import { isVectorPlan, parseDxf, planFromDwgDatabase, type AttachedData, type DwgDatabaseLike, type DxfResult, type Underlay } from '../../core';
+import { INSUNITS_FT, isVectorPlan, parseDxf, plausibleScale, planFromDwgDatabase, type AttachedData, type DwgDatabaseLike, type DxfResult, type Underlay } from '../../core';
 
 pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
 
@@ -201,13 +201,16 @@ export async function createUnderlay(file: File): Promise<NewUnderlay> {
 
   if (isVectorPlan(kind)) {
     const d = asset.dxf!;
-    if (d.ftPerUnit) {
-      meta.scale = d.ftPerUnit;
-      meta.calibrated = true;
-    } else {
-      // sin unidades declaradas: un dibujo de más de 2000 unidades de ancho casi siempre está en mm
-      const span = Math.max(asset.width, asset.height);
-      meta.scale = span > 2000 ? 1 / 304.8 : 1 / 0.3048;
+    const span = Math.max(d.bounds.maxX - d.bounds.minX, d.bounds.maxY - d.bounds.minY);
+    const pick = plausibleScale(span, d.ftPerUnit);
+    meta.scale = pick.ft;
+    if (d.ftPerUnit && !pick.corrected) meta.calibrated = true;
+    if (pick.corrected && pick.code) {
+      const said = INSUNITS_FT[d.insUnits]?.name ?? 'otra unidad';
+      const toM = (ft: number) => (ft * 0.3048).toLocaleString('es-CO', { maximumFractionDigits: ft * 0.3048 < 1 ? 3 : 0 });
+      meta.unitsNote =
+        `El archivo dice que está en ${said}, pero así el dibujo mediría ${toM(span * d.ftPerUnit!)} m de ancho. ` +
+        `Se tomó en ${INSUNITS_FT[pick.code].name} (${toM(span * pick.ft)} m). Si no es así, cambie las unidades del dibujo o calibre la escala.`;
     }
     meta.x = -d.bounds.minX * meta.scale;
     meta.y = -d.bounds.minY * meta.scale;

@@ -1144,7 +1144,7 @@ planHooks.load = async (given?: File) => {
     store.mutate((p) => (p.underlay = meta));
     store.recalcNow();
     setView('top');
-    flash(meta.calibrated ? 'Plano cargado' : 'Plano cargado. Calibre la escala con una medida conocida.');
+    flash(meta.unitsNote ? 'Plano cargado. Las unidades del archivo no cuadraban: revise el aviso en Plano de fondo.' : meta.calibrated ? 'Plano cargado' : 'Plano cargado. Calibre la escala con una medida conocida.');
   } catch (err) {
     flash((err as Error).message);
   }

@@ -1,7 +1,7 @@
 /**
  * Sección "Plano de fondo" del panel izquierdo.
  */
-import { INSUNITS_FT, isVectorPlan, type Underlay } from '../../core';
+import { fmt, INSUNITS_FT, isVectorPlan, type Underlay } from '../../core';
 import { h } from './dom';
 import { numField } from './fields';
 import { store } from './state';
@@ -66,6 +66,7 @@ export function planSection(): HTMLElement {
         x.x = cx - x.scale * (ox * Math.cos(r) - oy * Math.sin(r));
         x.y = cy - x.scale * (ox * Math.sin(r) + oy * Math.cos(r));
         x.calibrated = true;
+        delete x.unitsNote;
       });
     });
     scaleField = h('div', { class: 'field select' }, h('span', null, 'Unidades del dibujo'), sel);
@@ -159,12 +160,18 @@ export function planSection(): HTMLElement {
     isVectorPlan(u.kind) && asset?.dxf && asset.dxf.stats.texts > 0
       ? h('p', { class: 'muted-text' }, `${asset.dxf.stats.texts} textos del dibujo no se muestran.`)
       : null;
+  // tamaño del dibujo con la escala actual, para ver de un vistazo si las unidades están bien
+  const b = isVectorPlan(u.kind) ? asset?.dxf?.bounds : undefined;
+  const sizeRow = b
+    ? [h('dt', null, 'Tamaño'), h('dd', null, `${fmt('length', (b.maxX - b.minX) * u.scale, units, true)} × ${fmt('length', (b.maxY - b.minY) * u.scale, units, true)}`)]
+    : null;
 
   return h(
     'section',
     { class: 'section' },
     h('h2', null, 'Plano de fondo'),
-    h('dl', { class: 'readout' }, h('dt', null, KIND_NAMES[u.kind]), h('dd', { class: 'ellipsis', title: u.name }, u.name)),
+    h('dl', { class: 'readout' }, h('dt', null, KIND_NAMES[u.kind]), h('dd', { class: 'ellipsis', title: u.name }, u.name), sizeRow),
+    u.unitsNote ? h('p', { class: 'notice' }, u.unitsNote) : null,
     !asset ? h('p', { class: 'muted-text' }, 'Leyendo el plano…') : null,
     !u.calibrated
       ? h('p', { class: 'notice' }, 'La escala del plano no está confirmada. Use Calibrar y marque dos puntos con una medida conocida, como un eje o un muro.')
