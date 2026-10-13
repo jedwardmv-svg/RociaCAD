@@ -10,7 +10,7 @@ export type Selection =
   | { kind: 'element'; id: string }
   | null;
 
-export type Tool = 'select' | 'draw' | 'sprinkler' | 'element' | 'calibrate' | 'move-plan';
+export type Tool = 'select' | 'draw' | 'sprinkler' | 'fill' | 'element' | 'calibrate' | 'move-plan';
 
 export type ColorMode = 'material' | 'size' | 'pressure' | 'velocity';
 
@@ -43,6 +43,17 @@ class Store {
     elementTypeId: 'wall-block-15',
     /** ft: base de los elementos nuevos */
     elementZ: 0,
+    /** llenar recinto */
+    fill: {
+      direction: 'x' as 'x' | 'y',
+      mainSide: 'start' as 'start' | 'end',
+      piping: 'branches-main' as 'none' | 'branches' | 'branches-main',
+      /** ft: altura de los ramales */
+      pipeZ: 3.5 / 0.3048,
+      /** ft: largo del bajante de los colgantes */
+      dropFt: 0.3 / 0.3048,
+      bySchedule: true,
+    },
   };
 
   private undoStack: string[] = [];

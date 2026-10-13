@@ -81,6 +81,7 @@ function emptyHelp(): HTMLElement {
     h('p', null, 'Haga clic en un tubo, un nodo o un rociador para ver y cambiar sus datos.'),
     h('p', null, 'Con la herramienta Tubería haga clic en un nodo existente y luego en el punto final. Termine con ', k('Esc'), ' o clic derecho.'),
     h('p', null, 'Con la herramienta Rociador haga clic en un nodo o sobre un tubo para colocar uno del modelo elegido.'),
+    h('p', null, 'Con Llenar recinto marque dos esquinas de un cuarto: se ponen los rociadores, los ramales y la matriz con los diámetros de la tabla.'),
     h('p', null, 'Con Elementos dibuje muros, columnas, vigas, losas, cielos, ductos y tuberías de otros sistemas.'),
     h('p', null, 'En Catálogo puede crear sus propias tuberías, rociadores y elementos.'),
     h('p', null, 'Arrastre para girar la vista, rueda para acercar y clic derecho para desplazar.'),

@@ -662,8 +662,18 @@ export class Viewer {
   }
 
   /** Línea de vista previa del dibujo, marca del cursor y (opcional) el trazo ya marcado. */
-  setPreview(from: THREE.Vector3 | null, to: THREE.Vector3 | null, snappedToNode = false, path: THREE.Vector3[] = []) {
+  setPreview(from: THREE.Vector3 | null, to: THREE.Vector3 | null, snappedToNode = false, path: THREE.Vector3[] = [], dots: THREE.Vector3[] = []) {
     this.overlay.clear();
+    if (dots.length) {
+      const m = new THREE.MeshBasicMaterial({ color: COLORS.preview, depthTest: false });
+      for (const d of dots) {
+        const dot = new THREE.Mesh(this.sphere, m);
+        dot.renderOrder = 10;
+        dot.scale.setScalar(0.25);
+        dot.position.copy(d);
+        this.overlay.add(dot);
+      }
+    }
     if (to) {
       const marker = new THREE.Mesh(
         this.sphere,

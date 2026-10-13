@@ -11,6 +11,10 @@ import {
   deletePipe,
   deleteSprinkler,
   emptyProject,
+  fillRoom,
+  getSprinklerModel,
+  planGrid,
+  spacingLimits,
   exampleGrid,
   exampleWarehouse,
   fmt,
@@ -65,6 +69,7 @@ const I = {
   fit: '<path d="M2 6V2h4M10 2h4v4M14 10v4h-4M6 14H2v-4"/>',
   labels: '<path d="M2 4h8l4 4-4 4H2z"/>',
   wall: '<path d="M2 13V5h12v8"/><path d="M2 9h12M6 5v4M10 9v4"/>',
+  fill: '<rect x="2" y="2" width="12" height="12" rx="1"/><circle cx="5" cy="5" r=".9"/><circle cx="11" cy="5" r=".9"/><circle cx="5" cy="11" r=".9"/><circle cx="11" cy="11" r=".9"/>',
   book: '<path d="M3 3h4a2 2 0 012 2v9a2 2 0 00-2-2H3z"/><path d="M13 3H9a2 2 0 00-2 2"/><path d="M13 3v9H9"/>',
 };
 const svg = (paths: string) => `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" stroke-linecap="round">${paths}</svg>`;
@@ -183,6 +188,7 @@ function renderToolbar() {
       tool('select', I.select, 'Seleccionar'),
       tool('draw', I.pipe, 'Tubería'),
       tool('sprinkler', I.head, 'Rociador'),
+      tool('fill', I.fill, 'Llenar recinto'),
       tool('element', I.wall, 'Elementos'),
       iconBtn(I.book, 'Catálogo', () => openCatalog(), { showLabel: true }),
     ),
@@ -246,6 +252,7 @@ function setTool(t: Tool) {
   measure = { a: null, b: null };
   elementPts = [];
   elementId = null;
+  fillStart = null;
   viewer.setPreview(null, null);
   $('viewport').classList.toggle('drawing', t !== 'select');
   renderToolbar();
@@ -304,6 +311,69 @@ function renderToolOptions() {
       selectInput<string>('Modelo', d.sprinklerModelId, catalogSprinklers().map((m) => ({ value: m.id, label: m.name })), 'draw-spk', (v) => (d.sprinklerModelId = v)),
       h('button', { class: 'btn outline small', onclick: () => openCatalog('sprinklers') }, 'Catálogo'),
     );
+  } else if (store.tool === 'fill') {
+    const f = d.fill;
+    const model = findSprinklerModel(d.sprinklerModelId);
+    const upright = model?.orientation === 'upright';
+    clear(
+      el,
+      h('span', null, 'Rociador'),
+      selectInput<string>('Modelo', d.sprinklerModelId, catalogSprinklers().map((m) => ({ value: m.id, label: m.name })), 'fill-spk', (v) => {
+        d.sprinklerModelId = v;
+        renderToolOptions();
+      }),
+      h('span', null, 'Ramales en'),
+      selectInput<'x' | 'y'>('Dirección de los ramales', f.direction, [{ value: 'x', label: 'Horizontal' }, { value: 'y', label: 'Vertical' }], 'fill-dir', (v) => (f.direction = v)),
+      selectInput<typeof f.piping>(
+        'Tubería',
+        f.piping,
+        [
+          { value: 'branches-main', label: 'Ramales y matriz' },
+          { value: 'branches', label: 'Solo ramales' },
+          { value: 'none', label: 'Solo rociadores' },
+        ],
+        'fill-piping',
+        (v) => {
+          f.piping = v;
+          renderToolOptions();
+        },
+      ),
+      f.piping === 'branches-main'
+        ? selectInput<'start' | 'end'>(
+            'Lado de la matriz',
+            f.mainSide,
+            [
+              { value: 'start', label: f.direction === 'x' ? 'Matriz a la izquierda' : 'Matriz abajo' },
+              { value: 'end', label: f.direction === 'x' ? 'Matriz a la derecha' : 'Matriz arriba' },
+            ],
+            'fill-side',
+            (v) => (f.mainSide = v),
+          )
+        : null,
+      h('span', null, 'Altura tubería'),
+      numInput({ label: 'Altura de los ramales', q: 'elevation', value: f.pipeZ, key: 'fill-z', onCommit: (v) => (f.pipeZ = v) }),
+      h('span', null, 'Bajante'),
+      numInput({
+        label: 'Largo del bajante',
+        q: 'length',
+        value: upright ? 0 : f.dropFt,
+        key: 'fill-drop',
+        min: 0,
+        disabled: upright,
+        hint: 'Los rociadores montantes van sobre el ramal, sin bajante',
+        onCommit: (v) => (f.dropFt = v),
+      }),
+      h(
+        'label',
+        { class: 'check', title: 'Diámetros mínimos de la tabla de NFPA 13 según los rociadores que alimenta cada tubo' },
+        (() => {
+          const c = h('input', { type: 'checkbox', checked: f.bySchedule, 'data-key': 'fill-sched' });
+          c.addEventListener('change', () => (f.bySchedule = c.checked));
+          return c;
+        })(),
+        'Diámetros por tabla',
+      ),
+    );
   } else if (store.tool === 'element') {
     const types = catalogElements();
     if (!types.some((t) => t.id === d.elementTypeId)) d.elementTypeId = types[0].id;
@@ -336,6 +406,9 @@ function renderHint() {
       ? 'Clic para el siguiente punto. Alt desactiva el ajuste a 45°. Esc o clic derecho termina.'
       : 'Clic en un nodo, un tubo o un punto vacío para empezar a dibujar.',
     sprinkler: 'Clic en un nodo o sobre un tubo para colocar un rociador.',
+    fill: fillStart
+      ? 'Clic en la esquina opuesta del recinto. Esc cancela.'
+      : 'Clic en una esquina del recinto (se ajusta a las líneas del plano y a los muros). La matriz se une sola a un tubo o nodo cercano.',
     element: elementHint(),
     calibrate:
       store.project.underlay && isVectorPlan(store.project.underlay.kind)
@@ -564,6 +637,124 @@ function onElementClick(ev: PointerEvent) {
   renderHint();
 }
 
+// ---------- Llenar recinto ----------
+let fillStart: THREE.Vector3 | null = null;
+
+/** Punto del recinto: se ajusta al plano DXF/DWG y a los vértices de los elementos */
+function fillTarget(ev: PointerEvent): { point: THREE.Vector3; snapped: boolean } | null {
+  const z = store.drawDefaults.fill.pipeZ;
+  const rect = viewer.renderer.domElement.getBoundingClientRect();
+  const near = (x: number, y: number, wz: number) => {
+    const sp = viewer.toScreen(new THREE.Vector3(x, y, wz));
+    return Math.hypot(sp.x - (ev.clientX - rect.left), sp.y - (ev.clientY - rect.top)) < 12;
+  };
+  for (const e of store.project.elements ?? []) for (const q of e.points) if (near(q.x, q.y, e.z) || near(q.x, q.y, z)) return { point: new THREE.Vector3(q.x, q.y, z), snapped: true };
+  const ps = viewer.underlaySnap(ev);
+  if (ps) return { point: new THREE.Vector3(ps.x, ps.y, z), snapped: true };
+  const p = viewer.planePoint(ev, z);
+  if (!p) return null;
+  const grid = store.drawDefaults.gridFt;
+  const snap = (v: number) => (grid > 0 ? Math.round(v / grid) * grid : v);
+  return { point: new THREE.Vector3(snap(p.x), snap(p.y), z), snapped: false };
+}
+
+function cancelFill() {
+  fillStart = null;
+  viewer.setPreview(null, null);
+  renderHint();
+}
+
+const rectPath = (a: THREE.Vector3, b: THREE.Vector3) => [
+  new THREE.Vector3(a.x, a.y, a.z),
+  new THREE.Vector3(b.x, a.y, a.z),
+  new THREE.Vector3(b.x, b.y, a.z),
+  new THREE.Vector3(a.x, b.y, a.z),
+  new THREE.Vector3(a.x, a.y, a.z),
+];
+
+function fillPlan(a: THREE.Vector3, b: THREE.Vector3) {
+  const f = store.drawDefaults.fill;
+  const lim = spacingLimits(store.project, store.drawDefaults.sprinklerModelId);
+  const dx = Math.abs(b.x - a.x);
+  const dy = Math.abs(b.y - a.y);
+  return planGrid(f.direction === 'x' ? dx : dy, f.direction === 'x' ? dy : dx, lim);
+}
+
+function onFillMove(ev: PointerEvent) {
+  const t = fillTarget(ev);
+  if (!fillStart || !t) {
+    viewer.setPreview(null, t?.point ?? null, !!t?.snapped);
+    return;
+  }
+  const u = store.project.displayUnits;
+  const dx = Math.abs(t.point.x - fillStart.x);
+  const dy = Math.abs(t.point.y - fillStart.y);
+  if (dx < 0.5 || dy < 0.5) return viewer.setPreview(null, t.point, t.snapped, rectPath(fillStart, t.point));
+  const g = fillPlan(fillStart, t.point);
+  // dónde quedarían los rociadores
+  const dots: THREE.Vector3[] = [];
+  const x0 = Math.min(fillStart.x, t.point.x);
+  const y0 = Math.min(fillStart.y, t.point.y);
+  const alongX = store.drawDefaults.fill.direction === 'x';
+  if (g.along * g.across <= 2000)
+    for (let i = 0; i < g.along; i++)
+      for (let j = 0; j < g.across; j++) {
+        const a = g.s / 2 + i * g.s;
+        const c = g.l / 2 + j * g.l;
+        dots.push(new THREE.Vector3(alongX ? x0 + a : x0 + c, alongX ? y0 + c : y0 + a, t.point.z));
+      }
+  viewer.setPreview(null, t.point, t.snapped, rectPath(fillStart, t.point), dots);
+  $('hint').textContent = `${fmt('length', dx, u, true)} × ${fmt('length', dy, u, true)}: ${g.along * g.across} rociadores (${g.along} × ${g.across}), separación ${fmt('length', g.s, u, true)} × ${fmt('length', g.l, u, true)}, ${fmt('area', g.coverage, u, true)} c/u.`;
+}
+
+function onFillClick(ev: PointerEvent) {
+  const t = fillTarget(ev);
+  if (!t) return;
+  if (!fillStart) {
+    fillStart = t.point;
+    renderHint();
+    return;
+  }
+  const a = fillStart;
+  const b = t.point;
+  if (Math.abs(b.x - a.x) < 0.5 || Math.abs(b.y - a.y) < 0.5) return flash('El recinto es muy pequeño: marque la esquina opuesta');
+  const d = store.drawDefaults;
+  const f = d.fill;
+  const model = findSprinklerModel(d.sprinklerModelId);
+  const upright = model?.orientation === 'upright';
+  let res: ReturnType<typeof fillRoom> | undefined;
+  store.mutate((p) => {
+    if (model) putInProjectCatalog(p, 'sprinklers', model);
+    const m = findMaterial(d.material);
+    if (m) putInProjectCatalog(p, 'materials', m);
+    res = fillRoom(p, {
+      x0: a.x,
+      y0: a.y,
+      x1: b.x,
+      y1: b.y,
+      direction: f.direction,
+      pipeZ: f.pipeZ,
+      dropFt: upright ? 0 : f.dropFt,
+      k: getSprinklerModel(d.sprinklerModelId, p)?.k ?? 5.6,
+      modelId: model ? d.sprinklerModelId : undefined,
+      piping: f.piping,
+      mainSide: f.mainSide,
+      material: d.material,
+      sizeBySchedule: f.bySchedule,
+      branchSize: d.size,
+      mainSize: d.size,
+    });
+  });
+  fillStart = null;
+  viewer.setPreview(null, null);
+  renderHint();
+  if (!res) return;
+  const u = store.project.displayUnits;
+  const g = res.plan;
+  const joined = f.piping !== 'branches-main' ? '' : res.connected ? ' La matriz quedó unida a la red.' : ' Una la matriz a la red con la herramienta Tubería.';
+  flash(`${res.sprinklerIds.length} rociadores a ${fmt('length', g.s, u, true)} × ${fmt('length', g.l, u, true)}.${joined}`);
+}
+
 function onSprinklerClick(ev: PointerEvent) {
   const hit = viewer.pick(ev);
   if (!hit) return;
@@ -593,6 +784,7 @@ canvas.addEventListener('pointerup', (e) => {
   if (e.button === 2) {
     if (store.tool === 'calibrate' || store.tool === 'move-plan') return setTool('select');
     if (store.tool === 'element') return endElement();
+    if (store.tool === 'fill') return cancelFill();
     if (store.tool === 'draw' && drawStart) {
       drawStart = null;
       viewer.setPreview(null, null);
@@ -605,6 +797,7 @@ canvas.addEventListener('pointerup', (e) => {
   if (store.tool === 'calibrate' || store.tool === 'move-plan') return onMeasureClick(e);
   if (store.tool === 'sprinkler') return onSprinklerClick(e);
   if (store.tool === 'element') return onElementClick(e);
+  if (store.tool === 'fill') return onFillClick(e);
   const hit = viewer.pick(e);
   store.select(hit ? { kind: hit.kind, id: hit.id } : null);
 });
@@ -624,6 +817,7 @@ canvas.addEventListener('pointermove', (e) => {
     if (t && last) $('hint').textContent = `Longitud ${fmt('length', t.point.distanceTo(last), store.project.displayUnits, true)}. ${elementHint()}`;
     return;
   }
+  if (store.tool === 'fill') return onFillMove(e);
   if (store.tool !== 'draw') return;
   const t = drawTarget(e);
   viewer.setPreview(drawStart?.point ?? null, t?.point ?? null, !!t?.nodeId || !!t?.pipeId || !!t?.onPlan);
@@ -992,6 +1186,8 @@ window.addEventListener('keydown', (e) => {
       elementId = null;
       viewer.setPreview(null, null);
       renderHint();
+    } else if (store.tool === 'fill' && fillStart) {
+      cancelFill();
     } else if (store.tool === 'draw' && drawStart) {
       drawStart = null;
       viewer.setPreview(null, null);
@@ -1015,6 +1211,7 @@ window.addEventListener('keydown', (e) => {
   else if (!mod && e.key.toLowerCase() === 't') setTool('draw');
   else if (!mod && e.key.toLowerCase() === 'r') setTool('sprinkler');
   else if (!mod && e.key.toLowerCase() === 'e') setTool('element');
+  else if (!mod && e.key.toLowerCase() === 'l') setTool('fill');
 });
 
 // ---------- Barra de estado ----------

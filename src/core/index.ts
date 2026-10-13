@@ -15,3 +15,4 @@ export * from './exportDxf';
 export * from './dwg';
 export * from './autoFittings';
 export * from './sizing';
+export * from './layout';
