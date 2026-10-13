@@ -13,3 +13,4 @@ export * from './dxf';
 export * from './catalog';
 export * from './exportDxf';
 export * from './dwg';
+export * from './autoFittings';

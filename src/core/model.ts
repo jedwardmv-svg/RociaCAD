@@ -192,6 +192,8 @@ export interface Project {
   elements?: BuildingElement[];
   /** Plano de fondo */
   underlay?: Underlay;
+  /** Sumar al cálculo los codos y tees que se deducen del dibujo */
+  autoFittings?: boolean;
 }
 
 /** Datos binarios de archivos adjuntos (plano de fondo), en base64. */

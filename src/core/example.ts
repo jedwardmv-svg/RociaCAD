@@ -29,6 +29,7 @@ export function emptyProject(): Project {
     nodes: [{ id: 'N1', x: 0, y: 0, z: 0, label: 'Suministro' }],
     pipes: [],
     sprinklers: [],
+    autoFittings: true,
   };
 }
 
@@ -41,6 +42,7 @@ export function emptyProject(): Project {
  */
 export function exampleWarehouse(): Project {
   const p = emptyProject();
+  p.autoFittings = false; // los accesorios del ejemplo están puestos a mano
   p.info = {
     name: 'Ejemplo: bodega riesgo ordinario 1',
     client: 'Proyecto de demostración',
@@ -122,6 +124,7 @@ export function exampleWarehouse(): Project {
  */
 export function exampleGrid(): Project {
   const p = emptyProject();
+  p.autoFittings = false; // los accesorios del ejemplo están puestos a mano
   p.info = { name: 'Ejemplo: sistema mallado', notes: 'Malla de 8 ramales de 1-1/4" entre dos matrices de 3".' };
   const nodes: Node[] = [];
   const pipes: Pipe[] = [];

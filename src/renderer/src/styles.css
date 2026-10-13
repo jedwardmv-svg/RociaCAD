@@ -307,6 +307,12 @@ textarea.input-text {
   cursor: pointer;
 }
 
+.auto-fittings {
+  margin: 6px 0 0;
+  font-size: 13px;
+  color: var(--muted);
+}
+
 .check input {
   accent-color: var(--brass);
   width: 16px;

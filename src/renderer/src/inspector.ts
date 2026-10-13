@@ -3,6 +3,7 @@
  */
 import {
   addDropWithSprinkler,
+  autoFittings,
   addSprinkler,
   deleteNode,
   deletePipe,
@@ -91,7 +92,8 @@ function pipePanel(id: string): HTMLElement {
   const pipe = store.project.pipes.find((p) => p.id === id)!;
   const u = store.project.displayUnits;
   const metric = u === 'metric';
-  const g = pipeGeometry(store.project, pipe);
+  const auto = autoFittings(store.project).get(id);
+  const g = pipeGeometry(store.project, pipe, auto);
   const r = store.result.ok ? store.result.pipes[id] : undefined;
   const set = (fn: (pp: typeof pipe) => void, key?: string) =>
     store.mutate((p) => {
@@ -188,7 +190,15 @@ function pipePanel(id: string): HTMLElement {
       'section',
       { class: 'section' },
       h('h2', null, 'Accesorios y válvulas'),
-      fittingRows.length ? fittingRows : h('p', { style: 'margin:0;color:var(--muted);font-size:13px' }, 'Sin accesorios hidráulicos.'),
+      fittingRows.length ? fittingRows : h('p', { style: 'margin:0;color:var(--muted);font-size:13px' }, auto ? 'Sin accesorios puestos a mano.' : 'Sin accesorios hidráulicos.'),
+      auto
+        ? h(
+            'p',
+            { class: 'auto-fittings', title: 'Deducidos del dibujo. Se apagan en el panel izquierdo, Herramientas de diseño.' },
+            'Automáticos: ',
+            auto.map((f) => `${f.count} ${FITTING_NAMES[f.type].toLowerCase()}`).join(', '),
+          )
+        : null,
       h(
         'div',
         { class: 'btn-row' },

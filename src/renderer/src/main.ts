@@ -801,6 +801,8 @@ function normalize(raw: unknown): { project: Project; attached: Record<string, A
     info: { ...base.info, ...p.info },
     criteria: { ...base.criteria, ...p.criteria },
     supply: { ...base.supply, ...p.supply },
+    // los archivos de versiones anteriores no traían accesorios automáticos
+    autoFittings: p.autoFittings ?? false,
     sprinklers: p.sprinklers ?? [],
     pipes: p.pipes.map((pp) => ({ ...pp, fittings: pp.fittings ?? [] })),
   };

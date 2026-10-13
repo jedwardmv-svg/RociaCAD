@@ -12,10 +12,11 @@
  *  4. Se suma la asignación de mangueras y se compara contra la curva de suministro.
  */
 import { getSprinklerModel } from './catalog';
+import { autoFittings } from './autoFittings';
 import { equivalentLength, FITTING_NAMES } from './fittings';
 import { HAZARDS } from './hazards';
 import { frictionLossPerFt, pipeResistance, supplyFlowAt, supplyPressureAt, velocity } from './hydraulics';
-import type { Pipe, Project } from './model';
+import type { FittingEntry, Pipe, Project } from './model';
 import { validateProject } from './model';
 import { connectedFrom, solveNetwork, type NetNode, type NetPipe, type NetResult } from './network';
 import { internalDiameter } from './pipes';
@@ -127,7 +128,7 @@ function emptyResult(errors: string[]): CalcResult {
 }
 
 /** Longitudes y diámetro de un tubo según el proyecto. */
-export function pipeGeometry(project: Project, pipe: Pipe): PipeGeometry {
+export function pipeGeometry(project: Project, pipe: Pipe, auto?: FittingEntry[]): PipeGeometry {
   const a = project.nodes.find((n) => n.id === pipe.from);
   const b = project.nodes.find((n) => n.id === pipe.to);
   const dist = a && b ? Math.hypot(b.x - a.x, b.y - a.y, b.z - a.z) : 0;
@@ -135,14 +136,22 @@ export function pipeGeometry(project: Project, pipe: Pipe): PipeGeometry {
   const idIn = pipe.idOverride ?? internalDiameter(pipe.material, pipe.size, project) ?? NaN;
   let fittingFt = 0;
   for (const f of pipe.fittings) fittingFt += f.count * equivalentLength(f.type, pipe.size, pipe.c, idIn);
+  for (const f of auto ?? []) fittingFt += f.count * equivalentLength(f.type, pipe.size, pipe.c, idIn);
   return { lengthFt, fittingFt, totalFt: lengthFt + fittingFt, idIn };
 }
 
-export function fittingsText(pipe: Pipe): string {
-  return pipe.fittings
+const listText = (list: FittingEntry[]) =>
+  list
     .filter((f) => f.count > 0)
     .map((f) => `${f.count} ${FITTING_NAMES[f.type]}`)
     .join(', ');
+
+/** Texto de accesorios del tubo; `auto` son los deducidos del dibujo */
+export function fittingsText(pipe: Pipe, auto?: FittingEntry[]): string {
+  const manual = listText(pipe.fittings);
+  const a = auto ? listText(auto) : '';
+  if (!a) return manual;
+  return manual ? `${manual} + auto: ${a}` : `auto: ${a}`;
 }
 
 /** Ejecuta el cálculo hidráulico completo del proyecto. */
@@ -157,9 +166,10 @@ export function calculate(project: Project): CalcResult {
   project.nodes.forEach((n, i) => index.set(n.id, i));
   const source = index.get(project.supply.nodeId)!;
 
+  const auto = autoFittings(project);
   const geom = new Map<string, PipeGeometry>();
   for (const p of project.pipes) {
-    const g = pipeGeometry(project, p);
+    const g = pipeGeometry(project, p, auto.get(p.id));
     if (!Number.isFinite(g.idIn)) {
       errors.push(`El tubo ${p.id} no tiene diámetro interno: el tamaño ${p.size}" no existe para ese material`);
     } else if (g.totalFt <= 0) {
@@ -318,7 +328,7 @@ export function calculate(project: Project): CalcResult {
       frictionLoss: fpf * g.totalFt,
       elevationLoss: PSI_PER_FT_WATER * (zDown - zUp),
       c: p.c,
-      fittingsText: fittingsText(p),
+      fittingsText: fittingsText(p, auto.get(p.id)),
     };
     if (v > maxVel) warnings.push(`Velocidad alta en el tubo ${p.id}: ${v.toFixed(1)} ft/s (límite ${maxVel} ft/s)`);
   });

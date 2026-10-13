@@ -9,7 +9,7 @@ import { store } from './state';
 import { supplyChartSvg } from './supplyChart';
 
 export function renderLeft(el: HTMLElement) {
-  rerender(el, () => clear(el, verdict(), planSection(), projectSection(), criteriaSection(), supplySection(), areaSection()));
+  rerender(el, () => clear(el, verdict(), planSection(), projectSection(), criteriaSection(), supplySection(), areaSection(), designToolsSection()));
 }
 
 function verdict(): HTMLElement {
@@ -207,6 +207,22 @@ function areaSection(): HTMLElement {
         { class: 'btn outline small', onclick: () => store.mutate((p) => p.sprinklers.forEach((s) => (s.inDesignArea = false))) },
         'Cerrar todos',
       ),
+    ),
+  );
+}
+
+function designToolsSection(): HTMLElement {
+  const auto = h('input', { type: 'checkbox', checked: !!store.project.autoFittings, 'data-key': 'auto-fittings' });
+  auto.addEventListener('change', () => store.mutate((p) => (p.autoFittings = auto.checked)));
+  return h(
+    'section',
+    { class: 'section' },
+    h('h2', null, 'Herramientas de diseño'),
+    h(
+      'label',
+      { class: 'check', title: 'Suma al cálculo los codos y tees que se ven en el dibujo: tee en cada derivación y codo en cada cambio de dirección' },
+      auto,
+      'Codos y tees automáticos en el cálculo',
     ),
   );
 }

@@ -16,6 +16,7 @@ const hw = (q: number, c: number, d: number, L: number) => (4.52 * Math.pow(q, 1
 /** Ramal recto: suministro S – N1 – N2 – N3, un rociador en cada N, todo a la misma altura. */
 function straightBranch(): Project {
   const p = emptyProject();
+  p.autoFittings = false; // comparación contra cálculo a mano sin accesorios
   p.criteria = { ...p.criteria, density: 0.15, minSprinklerPressure: 7, hoseAllowance: 0 };
   p.nodes = [
     { id: 'S', x: 0, y: 0, z: 0 },
@@ -96,6 +97,8 @@ describe('Ramal en árbol contra cálculo manual', () => {
 describe('Redes con lazos', () => {
   it('un lazo simétrico reparte el caudal por igual', () => {
     const p = emptyProject();
+    p.autoFittings = false;
+  p.autoFittings = false; // comparación contra cálculo a mano sin accesorios
     p.criteria = { ...p.criteria, density: 0.1, hoseAllowance: 0 };
     p.nodes = [
       { id: 'S', x: 0, y: 0, z: 0 },
@@ -115,6 +118,8 @@ describe('Redes con lazos', () => {
 
   it('en un lazo asimétrico la pérdida es igual por ambos caminos', () => {
     const p = emptyProject();
+    p.autoFittings = false;
+  p.autoFittings = false; // comparación contra cálculo a mano sin accesorios
     p.criteria = { ...p.criteria, density: 0.2, hoseAllowance: 0 };
     p.nodes = [
       { id: 'S', x: 0, y: 0, z: 0 },
