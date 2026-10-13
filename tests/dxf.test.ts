@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parseDxf } from '../src/core/dxf';
+import { aciColor, parseDxf } from '../src/core/dxf';
 
 /** Arma un DXF mínimo con los grupos (código, valor) dados */
 function dxf(opts: { units?: number; blocks?: string[][]; entities: string[][] }): string {
@@ -28,7 +28,7 @@ describe('Planos DXF', () => {
     const r = parseDxf(dxf({ units: 6, entities: [line(0, 0, 10, 0), line(10, 0, 10, 5, 'EJES')] }));
     expect(r.ftPerUnit).toBeCloseTo(3.28084, 4);
     expect(r.layers.map((l) => l.name)).toEqual(['EJES', 'MUROS']);
-    expect(r.layers.find((l) => l.name === 'MUROS')!.segments).toEqual([0, 0, 10, 0]);
+    expect(r.layers.find((l) => l.name === 'MUROS')!.segments).toEqual([0, 0, 0, 10, 0, 0]);
     expect(r.stats.segments).toBe(2);
     expect(r.bounds).toEqual({ minX: 0, minY: 0, maxX: 10, maxY: 5 });
   });
@@ -39,10 +39,10 @@ describe('Planos DXF', () => {
     const r = parseDxf(dxf({ entities: [poly] }));
     const s = r.layers[0].segments;
     let minY = Infinity;
-    for (let i = 1; i < s.length; i += 2) minY = Math.min(minY, s[i]);
+    for (let i = 1; i < s.length; i += 3) minY = Math.min(minY, s[i]);
     expect(minY).toBeCloseTo(-1, 2);
-    expect(s[s.length - 2]).toBeCloseTo(2, 6);
-    expect(s[s.length - 1]).toBeCloseTo(0, 6);
+    expect(s[s.length - 3]).toBeCloseTo(2, 6);
+    expect(s[s.length - 2]).toBeCloseTo(0, 6);
   });
 
   it('aplica posición, escala y giro de los bloques', () => {
@@ -50,7 +50,7 @@ describe('Planos DXF', () => {
     const insert = ['0', 'INSERT', '8', 'COLUMNAS', '2', 'COL', '10', '5', '20', '5', '30', '0', '41', '2', '42', '2', '50', '90'];
     const r = parseDxf(dxf({ blocks: [block], entities: [insert] }));
     expect(r.layers[0].name).toBe('COLUMNAS'); // la capa 0 del bloque hereda la del INSERT
-    const [x1, y1, x2, y2] = r.layers[0].segments;
+    const [x1, y1, , x2, y2] = r.layers[0].segments;
     expect([x1, y1]).toEqual([5, 5]);
     expect(x2).toBeCloseTo(5, 9); // girado 90° y escalado ×2
     expect(y2).toBeCloseTo(7, 9);
@@ -61,9 +61,38 @@ describe('Planos DXF', () => {
     const r = parseDxf(dxf({ entities: [circle] }));
     const s = r.layers[0].segments;
     expect(s[0]).toBeCloseTo(5, 9);
-    expect(s[s.length - 2]).toBeCloseTo(5, 9);
-    expect(s[s.length - 1]).toBeCloseTo(4, 9);
+    expect(s[s.length - 3]).toBeCloseTo(5, 9);
+    expect(s[s.length - 2]).toBeCloseTo(4, 9);
     expect(r.snapPoints).toEqual([3, 4]);
+  });
+
+  it('colores por entidad, por capa y por bloque', () => {
+    const red = ['0', 'LINE', '8', 'A', '62', '1', '10', '0', '20', '0', '30', '0', '11', '1', '21', '0', '31', '0'];
+    const r = parseDxf(dxf({ entities: [red, line(0, 0, 1, 1, 'B')] }));
+    expect(r.layers.find((l) => l.name === 'A')!.colors).toEqual([0xff0000]);
+    // sin tabla de capas: blanco
+    expect(r.layers.find((l) => l.name === 'B')!.colors).toEqual([0xffffff]);
+  });
+
+  it('dibuja los textos como trazos', () => {
+    const text = ['0', 'TEXT', '8', 'T', '10', '0', '20', '0', '30', '0', '40', '2', '1', 'ABC'];
+    const r = parseDxf(dxf({ entities: [text] }));
+    const s = r.layers[0].segments;
+    expect(r.stats.texts).toBe(1);
+    expect(s.length).toBeGreaterThan(6 * 5);
+    let maxY = -Infinity;
+    for (let i = 1; i < s.length; i += 3) maxY = Math.max(maxY, s[i]);
+    // altura de mayúscula = altura del texto
+    expect(maxY).toBeCloseTo(2, 1);
+  });
+
+  it('rellena los sólidos y respeta la altura (3D)', () => {
+    const face = ['0', '3DFACE', '8', 'F', '10', '0', '20', '0', '30', '5', '11', '1', '21', '0', '31', '5', '12', '1', '22', '1', '32', '5', '13', '0', '23', '1', '33', '5'];
+    const r = parseDxf(dxf({ entities: [face, line(0, 0, 1, 0)] }));
+    const f = r.layers.find((l) => l.name === 'F')!;
+    expect(f.fills.length).toBe(18);
+    expect(f.fills[2]).toBe(5);
+    expect(r.is3D).toBe(true);
   });
 
   it('avisa si no hay nada que dibujar', () => {
@@ -84,5 +113,17 @@ describe('Unidades mal declaradas', () => {
     expect(plausibleScale(360, INSUNITS_FT[6].ft).corrected).toBe(false);
     // sin unidades y 60 000 unidades: milímetros
     expect(plausibleScale(60000).code).toBe(4);
+  });
+});
+
+describe('Colores de AutoCAD', () => {
+  it('tabla ACI', () => {
+    expect(aciColor(1)).toBe(0xff0000);
+    expect(aciColor(7)).toBe(0xffffff);
+    expect(aciColor(10)).toBe(0xff0000);
+    expect(aciColor(11)).toBe(0xff7f7f);
+    expect(aciColor(12)).toBe(0xcc0000);
+    expect(aciColor(30)).toBe(0xff7f00);
+    expect(aciColor(250)).toBe(0x333333);
   });
 });

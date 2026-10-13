@@ -513,7 +513,7 @@ export class Viewer {
     }
     let id = this.assetIds.get(asset);
     if (!id) this.assetIds.set(asset, (id = this.nextAssetId++));
-    const key = `${id}|${(meta.hiddenLayers ?? []).join('\u0001')}`;
+    const key = `${id}|${meta.monochrome ? 'm' : 'c'}|${(meta.hiddenLayers ?? []).join('\u0001')}`;
     if (key !== this.underlayKey) {
       this.disposeUnderlay();
       this.underlayKey = key;
@@ -521,22 +521,86 @@ export class Viewer {
         const hidden = new Set(meta.hiddenLayers ?? []);
         const ox = asset.dxf.bounds.minX;
         const oy = asset.dxf.bounds.minY;
-        let n = 0;
-        for (const l of asset.dxf.layers) if (!hidden.has(l.name)) n += l.segments.length / 2;
-        const pos = new Float32Array(n * 3);
+        const mono = !!meta.monochrome;
+        // los colores muy oscuros se aclaran para que se vean sobre el fondo de la vista
+        const shade = new Map<number, [number, number, number]>();
+        const rgb = (c: number): [number, number, number] => {
+          let v = shade.get(c);
+          if (v) return v;
+          let r = ((c >> 16) & 255) / 255;
+          let g = ((c >> 8) & 255) / 255;
+          let b = (c & 255) / 255;
+          const lum = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+          if (lum < 0.35) {
+            const k = (0.35 - lum) / 0.35;
+            r += (1 - r) * k * 0.6;
+            g += (1 - g) * k * 0.6;
+            b += (1 - b) * k * 0.6;
+          }
+          v = [r, g, b];
+          shade.set(c, v);
+          return v;
+        };
+        let nSeg = 0;
+        let nTri = 0;
+        for (const l of asset.dxf.layers) {
+          if (hidden.has(l.name)) continue;
+          nSeg += l.segments.length / 6;
+          nTri += (l.fills?.length ?? 0) / 9;
+        }
+        if (nTri) {
+          const pos = new Float32Array(nTri * 9);
+          const col = new Float32Array(nTri * 9);
+          let k = 0;
+          for (const l of asset.dxf.layers) {
+            if (hidden.has(l.name) || !l.fills) continue;
+            const f = l.fills;
+            for (let i = 0, t = 0; i < f.length; i += 9, t++) {
+              const [r, g, b] = mono ? [0.42, 0.48, 0.54] : rgb(l.fillColors[t] ?? 0xffffff);
+              for (let v = 0; v < 3; v++) {
+                pos[k] = f[i + v * 3] - ox;
+                pos[k + 1] = f[i + v * 3 + 1] - oy;
+                pos[k + 2] = f[i + v * 3 + 2];
+                col[k] = r;
+                col[k + 1] = g;
+                col[k + 2] = b;
+                k += 3;
+              }
+            }
+          }
+          const geo = new THREE.BufferGeometry();
+          geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+          geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
+          const mat = new THREE.MeshBasicMaterial({ vertexColors: true, transparent: true, depthWrite: false, side: THREE.DoubleSide });
+          const mesh = new THREE.Mesh(geo, mat);
+          mesh.position.set(ox, oy, 0);
+          mesh.renderOrder = -2;
+          this.underlayMaterials.push(mat);
+          this.underlayGroup.add(mesh);
+        }
+        const pos = new Float32Array(nSeg * 6);
+        const col = new Float32Array(nSeg * 6);
         let k = 0;
         for (const l of asset.dxf.layers) {
           if (hidden.has(l.name)) continue;
           const sg = l.segments;
-          for (let i = 0; i < sg.length; i += 2) {
-            pos[k++] = sg[i] - ox;
-            pos[k++] = sg[i + 1] - oy;
-            pos[k++] = 0;
+          for (let i = 0, t = 0; i < sg.length; i += 6, t++) {
+            const [r, g, b] = mono ? [0.71, 0.76, 0.81] : rgb(l.colors?.[t] ?? 0xffffff);
+            for (let v = 0; v < 2; v++) {
+              pos[k] = sg[i + v * 3] - ox;
+              pos[k + 1] = sg[i + v * 3 + 1] - oy;
+              pos[k + 2] = sg[i + v * 3 + 2];
+              col[k] = r;
+              col[k + 1] = g;
+              col[k + 2] = b;
+              k += 3;
+            }
           }
         }
         const geo = new THREE.BufferGeometry();
         geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
-        const mat = new THREE.LineBasicMaterial({ color: 0xb4c2cf, transparent: true, depthWrite: false });
+        geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
+        const mat = new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, depthWrite: false });
         const lines = new THREE.LineSegments(geo, mat);
         lines.position.set(ox, oy, 0);
         lines.renderOrder = -1;
@@ -558,7 +622,7 @@ export class Viewer {
     const g = this.underlayGroup;
     g.position.set(meta.x, meta.y, meta.z - 0.02);
     g.rotation.set(0, 0, THREE.MathUtils.degToRad(meta.rotation));
-    g.scale.set(meta.scale, meta.scale, 1);
+    g.scale.set(meta.scale, meta.scale, meta.scale);
     g.visible = meta.visible;
     for (const m of this.underlayMaterials) m.opacity = meta.opacity;
     this.grid.visible = !meta.visible;
@@ -588,6 +652,12 @@ export class Viewer {
     const box = new THREE.Box3();
     for (const [px, py] of [[x0, y0], [x0 + a.width, y0], [x0, y0 + a.height], [x0 + a.width, y0 + a.height]]) {
       box.expandByPoint(this.planToWorld(px, py));
+    }
+    // dibujo en 3D: la caja incluye sus alturas
+    const zr = a.kind === 'dxf' && a.dxf?.is3D ? a.dxf.zRange : undefined;
+    if (zr) {
+      box.min.z = Math.min(box.min.z, u.z + zr.min * u.scale);
+      box.max.z = Math.max(box.max.z, u.z + zr.max * u.scale);
     }
     return box;
   }

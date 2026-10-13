@@ -214,6 +214,9 @@ export async function createUnderlay(file: File): Promise<NewUnderlay> {
     }
     meta.x = -d.bounds.minX * meta.scale;
     meta.y = -d.bounds.minY * meta.scale;
+    // las capas que venían apagadas o congeladas en el archivo empiezan ocultas
+    const off = d.layers.filter((l) => l.off).map((l) => l.name);
+    if (off.length && off.length < d.layers.length) meta.hiddenLayers = off;
   } else if (kind === 'pdf') {
     meta.scale = pdfScaleFt(100);
   } else {

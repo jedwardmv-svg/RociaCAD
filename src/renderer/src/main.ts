@@ -1135,7 +1135,7 @@ planHooks.asset = () => (store.project.underlay && currentAssetKey === underlayK
 planHooks.load = async (given?: File) => {
   const file = given ?? (await pickPlanFile());
   if (!file) return;
-  flash('Leyendo el plano…');
+  flash(file.name.toLowerCase().endsWith('.dwg') ? 'Leyendo el plano… un DWG grande puede tardar hasta un minuto.' : 'Leyendo el plano…');
   try {
     const { meta, data, asset } = await createUnderlay(file);
     store.attached.set(meta.dataId, data);

@@ -147,7 +147,7 @@ export function planSection(): HTMLElement {
               x.hiddenLayers = set.size ? [...set] : undefined;
             }),
           );
-          return h('li', null, h('label', { class: 'check' }, cb, h('span', null, l.name), h('small', null, String(l.segments.length / 4))));
+          return h('li', null, h('label', { class: 'check' }, cb, h('span', null, l.name), h('small', null, String(l.segments.length / 6 + (l.fills?.length ?? 0) / 9))));
         }),
       ),
     );
@@ -156,10 +156,22 @@ export function planSection(): HTMLElement {
     det.addEventListener('toggle', () => (layersOpen = det.open));
   }
 
-  const dxfNote =
-    isVectorPlan(u.kind) && asset?.dxf && asset.dxf.stats.texts > 0
-      ? h('p', { class: 'muted-text' }, `${asset.dxf.stats.texts} textos del dibujo no se muestran.`)
-      : null;
+  const colorsBox = h('input', { type: 'checkbox', checked: !u.monochrome, 'data-key': 'plan-colors' });
+  colorsBox.addEventListener('change', () => setU((x) => (x.monochrome = !colorsBox.checked || undefined)));
+  const d3 = isVectorPlan(u.kind) ? asset?.dxf : undefined;
+  const dxfNote = d3
+    ? [
+        h('label', { class: 'check', title: 'Usar los colores del archivo, o dibujar el plano en gris para que resalte la red' }, colorsBox, 'Colores del dibujo'),
+        d3.is3D
+          ? h(
+              'p',
+              { class: 'muted-text' },
+              `El dibujo trae objetos en 3D (alturas de ${fmt('elevation', d3.zRange.min * u.scale, units, true)} a ${fmt('elevation', d3.zRange.max * u.scale, units, true)}): véalos en la vista 3D.`,
+            )
+          : null,
+        (d3.stats.skipped.HATCH ?? 0) > 0 ? h('p', { class: 'muted-text' }, `${d3.stats.skipped.HATCH} sombreados con patrón no se muestran (los rellenos sólidos sí).`) : null,
+      ]
+    : null;
   // tamaño del dibujo con la escala actual, para ver de un vistazo si las unidades están bien
   const b = isVectorPlan(u.kind) ? asset?.dxf?.bounds : undefined;
   const sizeRow = b

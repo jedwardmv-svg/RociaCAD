@@ -195,6 +195,8 @@ export interface Underlay {
   calibrated: boolean;
   /** aviso si las unidades del archivo se corrigieron al cargarlo */
   unitsNote?: string;
+  /** DXF/DWG: dibujar en un solo color en vez de los colores del archivo */
+  monochrome?: boolean;
 }
 
 /** DXF y DWG son dibujos de líneas (capas, ajuste del cursor); PDF e imagen son fotos */
