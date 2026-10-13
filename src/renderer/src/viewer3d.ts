@@ -205,7 +205,11 @@ export class Viewer {
     const box = new THREE.Box3();
     for (const n of project.nodes) box.expandByPoint(new THREE.Vector3(n.x, n.y, n.z));
     for (const e of project.elements ?? []) for (const q of e.points) box.expandByPoint(new THREE.Vector3(q.x, q.y, e.z));
-    if (box.isEmpty()) box.set(new THREE.Vector3(-10, -10, 0), new THREE.Vector3(10, 10, 10));
+    // proyecto en blanco (solo el suministro): mostrar un área de trabajo de unos 20 m
+    if (box.isEmpty() || (project.pipes.length === 0 && !(project.elements ?? []).length)) {
+      const c = box.isEmpty() ? new THREE.Vector3() : box.getCenter(new THREE.Vector3());
+      box.set(c.clone().add(new THREE.Vector3(-33, -33, 0)), c.clone().add(new THREE.Vector3(33, 33, 10)));
+    }
     this.modelBounds = box;
     this.bounds = this.combinedBounds();
 

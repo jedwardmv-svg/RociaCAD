@@ -1081,7 +1081,8 @@ async function start() {
   } catch {
     /* sin WebGL */
   }
-  store.load(exampleWarehouse());
+  // la app abre con un proyecto en blanco; los ejemplos están en Archivo → Ejemplos
+  store.load(emptyProject());
   // Acceso para pruebas automáticas (solo si se abre con #debug)
   if (location.hash === '#debug') Object.assign(window, { rociaDebug: { store, viewer, actions, setTool, setView, planHooks, projectFileContent, normalize } });
   renderViewSwitch();

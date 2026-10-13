@@ -15,6 +15,23 @@ export function renderLeft(el: HTMLElement) {
 function verdict(): HTMLElement {
   const r = store.result;
   const u = store.project.displayUnits;
+  // proyecto en blanco: en vez de errores, los primeros pasos
+  if (!store.project.pipes.length && !store.project.sprinklers.length) {
+    return h(
+      'section',
+      { class: 'verdict start', 'aria-live': 'polite' },
+      h('div', { class: 'verdict-head' }, h('div', { class: 'verdict-state' }, 'Proyecto en blanco')),
+      h(
+        'ol',
+        { class: 'verdict-steps' },
+        h('li', null, 'Cargue el plano en ', h('b', null, 'Plano de fondo'), ' (DWG, DXF, PDF o imagen).'),
+        h('li', null, 'Dibuje la red con la herramienta ', h('b', null, 'Tubería'), ', empezando en el punto de suministro.'),
+        h('li', null, 'Ponga los rociadores con la herramienta ', h('b', null, 'Rociador'), '.'),
+        h('li', null, 'Llene el criterio de diseño y el suministro de agua más abajo.'),
+      ),
+      h('p', { class: 'muted-text' }, 'Para ver un sistema terminado, abra Archivo → Ejemplos.'),
+    );
+  }
   if (!r.ok) {
     return h(
       'section',

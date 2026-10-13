@@ -33,7 +33,7 @@ export function planSection(): HTMLElement {
       'section',
       { class: 'section' },
       h('h2', null, 'Plano de fondo'),
-      h('p', { class: 'muted-text' }, 'Cargue el plano arquitectónico en DXF, PDF o imagen para dibujar la tubería encima.'),
+      h('p', { class: 'muted-text' }, 'Cargue el plano arquitectónico en DWG, DXF, PDF o imagen para dibujar la tubería encima.'),
       h('div', { class: 'btn-row' }, h('button', { class: 'btn outline small', onclick: () => planHooks.load() }, 'Cargar plano')),
     );
   }
