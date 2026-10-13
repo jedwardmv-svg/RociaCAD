@@ -112,7 +112,7 @@ export function flash(msg: string) {
   const t = h('div', { class: 'toast', role: 'status' }, msg);
   document.body.append(t);
   window.clearTimeout(toastTimer);
-  toastTimer = window.setTimeout(() => t.remove(), 2600);
+  toastTimer = window.setTimeout(() => t.remove(), Math.max(2600, msg.length * 55));
 }
 
 /** Vuelve a renderizar un contenedor conservando el foco del campo activo. */

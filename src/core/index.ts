@@ -14,3 +14,4 @@ export * from './catalog';
 export * from './exportDxf';
 export * from './dwg';
 export * from './autoFittings';
+export * from './sizing';

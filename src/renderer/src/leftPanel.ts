@@ -1,7 +1,18 @@
 /**
  * Panel izquierdo: veredicto del cálculo, datos del proyecto, criterios y suministro.
  */
-import { fmt, HAZARD_NAMES, HAZARDS, suggestDesignArea, unitLabel, type HazardId } from '../../core';
+import {
+  fmt,
+  HAZARD_NAMES,
+  HAZARDS,
+  SCHEDULE_CLASS_NAMES,
+  scheduleClassFor,
+  sizeBySchedule,
+  suggestDesignArea,
+  unitLabel,
+  type HazardId,
+  type SizingResult,
+} from '../../core';
 import { clear, h } from './dom';
 import { flash, numField, rerender, selectField, textField } from './fields';
 import { planSection } from './planPanel';
@@ -224,5 +235,33 @@ function designToolsSection(): HTMLElement {
       auto,
       'Codos y tees automáticos en el cálculo',
     ),
+    h(
+      'div',
+      { class: 'btn-row' },
+      h(
+        'button',
+        {
+          class: 'btn outline small',
+          title: 'Pone a cada tubo el diámetro mínimo de la tabla de NFPA 13 según los rociadores que alimenta (la alimentación enterrada no se toca)',
+          onclick: () => runSizing(),
+        },
+        'Dimensionar tubería por tabla',
+      ),
+    ),
   );
+}
+
+/** Dimensiona toda la red (o los tubos dados) y avisa qué pasó */
+export function runSizing(pipeIds?: string[]) {
+  const c = store.project.criteria;
+  const cls = scheduleClassFor(c.hazard, c.density);
+  let r: SizingResult | undefined;
+  store.mutate((p) => {
+    r = sizeBySchedule(p, { pipeIds });
+  });
+  const n = Object.keys(r!.changed).length;
+  const head = n
+    ? `Se cambió el diámetro de ${n} tubo${n > 1 ? 's' : ''} con la tabla de ${SCHEDULE_CLASS_NAMES[cls].toLowerCase()}.`
+    : `Los diámetros ya cumplen la tabla de ${SCHEDULE_CLASS_NAMES[cls].toLowerCase()}.`;
+  flash([head, ...r!.warnings].join(' '));
 }
