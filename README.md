@@ -13,7 +13,8 @@ Programa libre para diseñar y calcular sistemas de rociadores automáticos cont
 - **Trazado rápido**: *Llenar recinto* reparte los rociadores de un cuarto con dos clics, respetando la separación y la cobertura máximas del riesgo, y crea ramales, bajantes y matriz unida a la red. *Repetir* copia ramales o grupos en fila y los conecta solos a la matriz. Selección por ventana (Mayús + arrastrar), mover, borrar y cambiar diámetro o modelo de varios objetos, y poner o quitar bajantes.
 - **Dimensionamiento por tabla** (pipe schedule de NFPA 13, riesgo ligero, ordinario y extra, acero y cobre) según los rociadores que alimenta cada tubo.
 - **Codos y tees automáticos en el cálculo**: se deducen del dibujo (tee en cada derivación, codo en cada cambio de dirección) y se suman a la longitud equivalente.
-- **Área de diseño**: selección manual o sugerida (los rociadores hidráulicamente más remotos).
+- **Área de diseño según NFPA 13**: la sugerencia automática prueba los rectángulos posibles (N rociadores, lado paralelo a los ramales de al menos 1,2·√A) y deja el que más exige al suministro; también se puede ubicar con el mouse. El panel y la memoria de cálculo revisan el número de rociadores, el área cubierta y la forma, y el contorno se ve en el dibujo.
+- **Etiquetas en el dibujo**: nombres de nodos, tubos y rociadores, o resultados (presión en las uniones, presión y caudal de cada rociador abierto, diámetro y caudal de cada tubo).
 - **Lista de materiales**: tubos comerciales por material y diámetro, codos, tees, cruces, reducciones y tapones detectados en el dibujo, válvulas y rociadores, con precios y total.
 - **Memoria de cálculo en PDF**: resumen, gráfica de suministro contra demanda en papel N^1,85, tabla por tramos, rociadores, avisos y materiales.
 - **Elementos del edificio**: muros, columnas, vigas, losas, cielos falsos, ductos y tuberías de otros sistemas, dibujados sobre el plano y vistos en 3D.
