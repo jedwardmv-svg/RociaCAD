@@ -56,7 +56,10 @@ describe('Actualización en Mac', () => {
     return { root, apps, current, staged, script };
   }
 
-  it('reemplaza la app por la nueva y la vuelve a abrir', () => {
+  // el guion es de bash (macOS); en Windows no se puede ejecutar
+  const bashIt = it.skipIf(process.platform === 'win32');
+
+  bashIt('reemplaza la app por la nueva y la vuelve a abrir', () => {
     const t = setup();
     execFileSync('/bin/bash', [t.script]);
     expect(readFileSync(join(t.current, 'Contents', 'version'), 'utf8')).toBe('0.5.0');
@@ -67,7 +70,7 @@ describe('Actualización en Mac', () => {
     expect(existsSync(join(t.root, 'fallo.txt'))).toBe(false);
   });
 
-  it('si la copia falla deja intacta la versión anterior', () => {
+  bashIt('si la copia falla deja intacta la versión anterior', () => {
     const t = setup(true);
     spawnSync('/bin/bash', [t.script]);
     expect(readFileSync(join(t.current, 'Contents', 'version'), 'utf8')).toBe('0.4.0');
