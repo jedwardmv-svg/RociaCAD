@@ -11,7 +11,7 @@ const api = {
     ipcRenderer.invoke('file:save', args),
   /** Lee un DWG en la ventana aislada; devuelve el plano en líneas */
   parseDwg: (bytes: Uint8Array): Promise<unknown> => ipcRenderer.invoke('dwg:parse', bytes),
-  exportPdf: (args: { suggestedName: string }): Promise<{ path: string } | null> => ipcRenderer.invoke('pdf:export', args),
+  exportPdf: (args: { suggestedName: string; page?: { width: number; height: number } }): Promise<{ path: string } | null> => ipcRenderer.invoke('pdf:export', args),
   confirm: (args: { message: string; detail?: string; buttons: string[] }): Promise<number> => ipcRenderer.invoke('app:confirm', args),
   appInfo: (): Promise<{ version: string; platform: string }> => ipcRenderer.invoke('app:info'),
   setDirty: (value: boolean) => ipcRenderer.send('state:dirty', value),

@@ -99,6 +99,7 @@ function buildMenu() {
         { type: 'separator' },
         item('Cargar plano de fondo (DXF, PDF o imagen)…', 'load-plan', 'CmdOrCtrl+L'),
         item('Exportar reporte PDF…', 'export-pdf', 'CmdOrCtrl+P'),
+        item('Planos de entrega (PDF)…', 'export-drawings', 'CmdOrCtrl+Shift+P'),
         item('Exportar dibujo DXF (para AutoCAD)…', 'export-dxf', 'CmdOrCtrl+E'),
         { type: 'separator' },
         {
@@ -190,14 +191,23 @@ ipcMain.handle('file:save', async (_e, args: { path?: string; content: string; s
   return { path, name: basename(path) };
 });
 
-ipcMain.handle('pdf:export', async (_e, args: { suggestedName: string }) => {
+ipcMain.handle('pdf:export', async (_e, args: { suggestedName: string; page?: { width: number; height: number } }) => {
   if (!win) return null;
   const r = await dialog.showSaveDialog(win, {
     filters: [{ name: 'PDF', extensions: ['pdf'] }],
     defaultPath: args.suggestedName + '.pdf',
   });
   if (r.canceled || !r.filePath) return null;
-  const data = await win.webContents.printToPDF({
+  // planos: hoja del tamaño pedido, sin márgenes ni pie de página (el rótulo va en el dibujo)
+  const data = args.page
+    ? await win.webContents.printToPDF({
+        pageSize: { width: args.page.width / 25.4, height: args.page.height / 25.4 },
+        printBackground: true,
+        margins: { top: 0, bottom: 0, left: 0, right: 0 },
+        displayHeaderFooter: false,
+        preferCSSPageSize: true,
+      })
+    : await win.webContents.printToPDF({
     pageSize: 'Letter',
     printBackground: true,
     margins: { top: 0.5, bottom: 0.6, left: 0.5, right: 0.5 },

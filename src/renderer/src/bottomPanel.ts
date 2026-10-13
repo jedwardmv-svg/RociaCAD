@@ -6,8 +6,9 @@ import { clear, h, parseNum } from './dom';
 import { numInput, rerender } from './fields';
 import { isSelected, store, type Selection } from './state';
 import { fabricationTab } from './fabrication';
+import { currentReview, reviewTab } from './review';
 
-type TabId = 'pipes' | 'sprinklers' | 'nodes' | 'bom' | 'fab' | 'messages';
+type TabId = 'pipes' | 'sprinklers' | 'nodes' | 'bom' | 'fab' | 'review' | 'messages';
 let tab: TabId = 'pipes';
 
 export function renderBottom(el: HTMLElement) {
@@ -41,6 +42,7 @@ export function renderBottom(el: HTMLElement) {
         tabBtn('nodes', 'Nodos', store.project.nodes.length),
         tabBtn('bom', 'Materiales'),
         tabBtn('fab', 'Fabricación'),
+        tabBtn('review', 'Revisión NFPA', reviewCount(), reviewCount() > 0),
         tabBtn('messages', 'Avisos', msgCount, msgCount > 0),
       ),
       body,
@@ -50,10 +52,21 @@ export function renderBottom(el: HTMLElement) {
     else if (tab === 'nodes') nodesTable(body);
     else if (tab === 'bom') bomTable(body);
     else if (tab === 'fab') fabricationTab(body);
+    else if (tab === 'review') reviewTab(body);
     else messages(body);
   });
   body.scrollTop = prevScroll[0];
   body.scrollLeft = prevScroll[1];
+}
+
+function reviewCount(): number {
+  if (!store.project.sprinklers.length && !store.project.pipes.length) return 0;
+  try {
+    const r = currentReview();
+    return r.errors + r.warnings;
+  } catch {
+    return 0;
+  }
 }
 
 export function showTab(id: TabId) {

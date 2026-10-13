@@ -45,7 +45,8 @@ import {
 import { renderBottom } from './bottomPanel';
 import { openCatalog } from './catalogDialog';
 import { adoptFromProject, catalogElements, catalogMaterials, catalogSprinklers, findElementType, findMaterial, findSprinklerModel } from './catalogStore';
-import { buildDxf } from '../../core';
+import { buildDxf, drawingSettings } from '../../core';
+import * as core from '../../core';
 import { clear, h } from './dom';
 import { flash, numInput, selectInput } from './fields';
 import { editHooks, renderInspector } from './inspector';
@@ -53,6 +54,8 @@ import { designHooks, renderLeft } from './leftPanel';
 import { buildReport } from './report';
 import { planHooks } from './planPanel';
 import { buildFabricationSheet, fabricationHooks } from './fabrication';
+import { reviewHooks } from './review';
+import { buildSheets, drawingsHooks, openDrawingsDialog, sheetsReady } from './drawings';
 import { initPanels, togglePanel, toggleAllPanels } from './panels';
 import { selectionFrom, store, toggleInSelection, type ColorMode, type LabelMode, type Tool } from './state';
 import { createUnderlay, loadAsset, pickPlanFile, setMaxTexture, switchPlanView, viewAsset, type UnderlayAsset } from './underlay';
@@ -73,6 +76,7 @@ const I = {
   pipe: '<path d="M2 11h6V5h6"/><circle cx="2" cy="11" r="1.2"/><circle cx="14" cy="5" r="1.2"/>',
   head: '<path d="M8 2v5"/><path d="M5 7h6"/><path d="M8 7l-3 6M8 7l3 6M8 7v6"/>',
   pdf: '<path d="M4 2h5l3 3v9H4z"/><path d="M6 9h4M6 11.5h4"/>',
+  sheets: '<rect x="2" y="3" width="12" height="10" rx="1"/><path d="M10 3v10M10 9h4M4 6h4M4 8.5h3"/>',
   fit: '<path d="M2 6V2h4M10 2h4v4M14 10v4h-4M6 14H2v-4"/>',
   labels: '<path d="M2 4h8l4 4-4 4H2z"/>',
   wall: '<path d="M2 13V5h12v8"/><path d="M2 9h12M6 5v4M10 9v4"/>',
@@ -81,7 +85,7 @@ const I = {
 };
 const svg = (paths: string) => `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" stroke-linecap="round">${paths}</svg>`;
 
-function iconBtn(icon: string, label: string, onclick: () => void, opts: { active?: boolean; disabled?: boolean; showLabel?: boolean; cls?: string; key?: string } = {}) {
+function iconBtn(icon: string, label: string, onclick: () => void, opts: { active?: boolean; disabled?: boolean; showLabel?: boolean; text?: string; cls?: string; key?: string } = {}) {
   const b = h('button', {
     class: `btn${opts.active ? ' active' : ''}${opts.cls ? ' ' + opts.cls : ''}`,
     title: label,
@@ -90,7 +94,7 @@ function iconBtn(icon: string, label: string, onclick: () => void, opts: { activ
     disabled: opts.disabled,
     onclick,
   });
-  b.innerHTML = svg(icon) + (opts.showLabel ? `<span>${label}</span>` : '');
+  b.innerHTML = svg(icon) + (opts.showLabel ? `<span>${opts.text ?? label}</span>` : '');
   return b;
 }
 
@@ -215,7 +219,7 @@ function renderToolbar() {
       tool('sprinkler', I.head, 'Rociador'),
       tool('fill', I.fill, 'Llenar recinto'),
       tool('element', I.wall, 'Elementos'),
-      iconBtn(I.book, 'Catálogo', () => openCatalog(), { showLabel: true }),
+      iconBtn(I.book, 'Catálogo', () => openCatalog(), { showLabel: true, cls: 'tool-catalog' }),
     ),
     h(
       'div',
@@ -225,7 +229,12 @@ function renderToolbar() {
     ),
     h('div', { class: 'tb-spacer' }),
     units,
-    h('div', { class: 'tb-group' }, iconBtn(I.pdf, 'Exportar reporte PDF', () => actions.exportPdf(), { showLabel: true, cls: 'primary' })),
+    h(
+      'div',
+      { class: 'tb-group tb-export' },
+      iconBtn(I.sheets, 'Planos de entrega (PDF)', () => openDrawingsDialog(), { showLabel: true, text: 'Planos', cls: 'outline' }),
+      iconBtn(I.pdf, 'Exportar memoria de cálculo (PDF)', () => actions.exportPdf(), { showLabel: true, text: 'Memoria', cls: 'primary' }),
+    ),
   );
 }
 
@@ -1131,6 +1140,21 @@ function applyCalibration(measured: number, real: number) {
   setTool('select');
 }
 
+reviewHooks.focus = (x, y, z) => viewer.focusOn(x, y, z);
+drawingsHooks.underlay = () => {
+  const u = store.project.underlay;
+  if (!u || !currentAsset || currentAssetKey !== underlayKey(u)) return undefined;
+  // los planos se dibujan sobre el espacio modelo, con su escala y posición
+  const place = u.layout ? u.viewPlacements?.[''] : undefined;
+  const meta = place ? { ...u, ...place, layout: undefined } : u;
+  return { meta, dxf: currentAsset.dxf, canvas: currentAsset.canvas, width: currentAsset.width, height: currentAsset.height };
+};
+drawingsHooks.export = async (name, paper) => {
+  if (desktop) {
+    const r = await desktop.exportPdf({ suggestedName: name, page: { width: paper.w, height: paper.h } });
+    if (r) flash('Planos guardados');
+  } else window.print();
+};
 planHooks.asset = () => {
   const u = store.project.underlay;
   return u && currentAsset && currentAssetKey === underlayKey(u) ? viewAsset(u, currentAsset) : undefined;
@@ -1411,6 +1435,8 @@ desktop?.onMenu(async (action) => {
       return;
     case 'export-pdf':
       return actions.exportPdf();
+    case 'export-drawings':
+      return openDrawingsDialog();
     case 'load-plan':
       return planHooks.load();
     case 'catalog':
@@ -1555,6 +1581,7 @@ async function start() {
   if (desktop) {
     try {
       appVersion = (await desktop.appInfo()).version;
+      drawingsHooks.version = appVersion;
     } catch {
       /* versión por defecto */
     }
@@ -1570,7 +1597,7 @@ async function start() {
   // la app abre con un proyecto en blanco; los ejemplos están en Archivo → Ejemplos
   store.load(emptyProject());
   // Acceso para pruebas automáticas (solo si se abre con #debug)
-  if (location.hash === '#debug') Object.assign(window, { rociaDebug: { store, viewer, actions, setTool, setView, planHooks, projectFileContent, normalize } });
+  if (location.hash === '#debug') Object.assign(window, { rociaDebug: { store, viewer, actions, setTool, setView, planHooks, projectFileContent, normalize, drawingsHooks, openDrawingsDialog, buildSheets, sheetsReady, drawingSettings, core } });
   renderViewSwitch();
   setTool('select');
   viewer.fit();

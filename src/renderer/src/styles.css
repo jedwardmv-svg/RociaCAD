@@ -236,6 +236,20 @@ textarea {
   flex: 1;
 }
 
+/* en pantallas angostas los botones muestran solo el icono (el nombre sale al pasar el mouse) */
+@media (max-width: 1640px) {
+  #toolbar .tb-export .btn span,
+  #toolbar .btn.tool-catalog span {
+    display: none;
+  }
+}
+
+@media (max-width: 1480px) {
+  #toolbar .btn span {
+    display: none;
+  }
+}
+
 .btn {
   display: inline-flex;
   align-items: center;
@@ -846,6 +860,14 @@ textarea.input-text {
   font-size: 12px;
 }
 
+.review-group .count {
+  padding: 0 6px;
+  border-radius: 8px;
+  background: var(--hover);
+  font-family: var(--num);
+  font-size: 12px;
+}
+
 .tabs .count.warn {
   background: var(--warn-soft);
   color: var(--warn);
@@ -974,6 +996,84 @@ table.grid tfoot td {
   background: var(--pass);
 }
 
+/* ---------- Revisión NFPA ---------- */
+.review-summary {
+  margin: 0;
+  padding: 10px 14px 4px;
+}
+
+.review-summary small {
+  display: block;
+  margin-top: 4px;
+  color: var(--muted);
+}
+
+.review {
+  padding: 4px 14px 12px;
+}
+
+.review-group {
+  border-bottom: 1px solid var(--line-soft);
+}
+
+.review-group summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 0;
+  cursor: pointer;
+}
+
+.review-group summary small {
+  margin-left: auto;
+  color: var(--muted);
+}
+
+.review .dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--warn);
+}
+
+.review-group.err .dot {
+  background: var(--fire);
+}
+
+.review-group.info .dot {
+  background: var(--muted);
+}
+
+.review-ok .dot {
+  display: inline-block;
+  margin-right: 8px;
+  background: var(--pass);
+}
+
+.review-group ul {
+  margin: 0 0 8px;
+  padding: 0 0 0 16px;
+  list-style: none;
+}
+
+.review-group li {
+  padding: 4px 8px;
+  border-radius: var(--r-sm, 4px);
+  cursor: pointer;
+}
+
+.review-group li:hover,
+.review-group li:focus {
+  background: var(--line-soft);
+  outline: none;
+}
+
+.review-ok {
+  margin: 8px 0 0;
+  color: var(--muted);
+}
+
 /* ---------- Barra de estado ---------- */
 #status {
   grid-area: st;
@@ -1023,6 +1123,165 @@ table.grid tfoot td {
     background: #fff;
     height: auto;
   }
+}
+
+/* ---------- Planos de entrega ---------- */
+#print-root.preparing {
+  display: block;
+  position: fixed;
+  top: 0;
+  left: -100000px;
+  pointer-events: none;
+}
+
+.sheet {
+  position: relative;
+  overflow: hidden;
+  break-after: page;
+  page-break-after: always;
+  background: #fff;
+}
+
+.sheet:last-child {
+  break-after: auto;
+  page-break-after: auto;
+}
+
+.sheet > svg {
+  display: block;
+}
+
+.ds-body {
+  position: absolute;
+  overflow: hidden;
+  column-gap: 6mm;
+  column-fill: auto;
+  font-family: Arial, Helvetica, sans-serif;
+  color: #000;
+  line-height: 1.3;
+}
+
+.ds-body section {
+  break-inside: avoid;
+  margin-bottom: 4mm;
+}
+
+.ds-body h3 {
+  margin: 0 0 1.5mm;
+  padding-bottom: 0.8mm;
+  border-bottom: 0.4mm solid #000;
+  font-size: 1.25em;
+  text-transform: uppercase;
+}
+
+.ds-body table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.ds-body th,
+.ds-body td {
+  padding: 0.6mm 1mm;
+  border: 0.2mm solid #999;
+  text-align: left;
+  vertical-align: top;
+}
+
+.ds-kv th {
+  width: 45%;
+  font-weight: 400;
+  color: #333;
+}
+
+.ds-kv td {
+  font-weight: 700;
+}
+
+.ds-placard {
+  padding: 1.5mm;
+  border: 0.6mm solid #000;
+}
+
+.ds-grid th {
+  background: #eee;
+}
+
+.ds-grid td.num {
+  text-align: right;
+  white-space: nowrap;
+}
+
+.ds-chart svg {
+  width: 100%;
+  max-width: 95mm;
+  height: auto;
+}
+
+.ds-body ol,
+.ds-body ul {
+  margin: 0;
+  padding-left: 5mm;
+}
+
+.ds-small {
+  color: #555;
+}
+
+.ds-sym svg {
+  display: block;
+}
+
+.drawings-dialog {
+  width: min(760px, 94vw);
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--panel);
+  color: var(--ink);
+}
+
+.drawings-dialog::backdrop {
+  background: rgba(10, 20, 30, 0.45);
+}
+
+.drawings-dialog header,
+.drawings-dialog footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--line);
+}
+
+.drawings-dialog footer {
+  justify-content: flex-end;
+  border-top: 1px solid var(--line);
+  border-bottom: 0;
+}
+
+.drawings-dialog h2 {
+  margin: 0;
+  font-size: 16px;
+}
+
+.drawings-dialog h3 {
+  margin: 14px 0 6px;
+  font-size: 13px;
+}
+
+.drawings-body {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px 24px;
+  padding: 4px 16px 12px;
+}
+
+.drawings-body textarea {
+  display: block;
+  box-sizing: border-box;
+  width: 100%;
+  font: inherit;
+  font-size: 12px;
 }
 
 table.grid tbody tr.idle td {

@@ -2,10 +2,11 @@
  * Reporte de cálculo hidráulico para imprimir o exportar a PDF.
  * Se arma dentro de #print-root; los estilos de impresión ocultan la app y muestran solo esto.
  */
-import { checkDesignArea, checkSystem, effectiveDesignArea, fmt, SYSTEM_TYPE_NAMES, getMaterial, HAZARD_NAMES, internalDiameter, ORIENTATION_NAMES, sizeLabel, unitLabel, type Quantity } from '../../core';
+import { RULE_NAMES, checkDesignArea, checkSystem, effectiveDesignArea, fmt, SYSTEM_TYPE_NAMES, getMaterial, HAZARD_NAMES, internalDiameter, ORIENTATION_NAMES, sizeLabel, unitLabel, type Quantity } from '../../core';
 import { clear, h } from './dom';
 import { store } from './state';
 import { supplyChartSvg } from './supplyChart';
+import { currentReview } from './review';
 
 export function buildReport(root: HTMLElement, opts: { image?: string; planImage?: string; version: string }) {
   const p = store.project;
@@ -185,6 +186,25 @@ export function buildReport(root: HTMLElement, opts: { image?: string; planImage
 
     if (r.warnings.length) parts.push(h('section', null, h('h2', null, 'Avisos'), h('ul', null, r.warnings.map((w) => h('li', null, w)))));
     if (r.notes?.length) parts.push(h('section', null, h('h2', null, 'Notas'), h('ul', null, r.notes.map((w) => h('li', null, w)))));
+    // revisión de reglas de NFPA 13
+    const rv = currentReview();
+    const shown = rv.findings.filter((f) => f.severity !== 'info');
+    parts.push(
+      h(
+        'section',
+        null,
+        h('h2', null, 'Revisión de reglas NFPA 13'),
+        h('p', null, shown.length ? `${rv.errors} incumplimiento(s) y ${rv.warnings} aviso(s).` : 'Sin incumplimientos en las reglas revisadas.'),
+        shown.length
+          ? h('ul', null, shown.slice(0, 40).map((f) => h('li', null, h('b', null, `${RULE_NAMES[f.rule]}: `), f.message)), shown.length > 40 ? h('li', null, `… y ${shown.length - 40} más.`) : null)
+          : null,
+        h(
+          'p',
+          { class: 'r-small' },
+          'Reglas revisadas: ' + rv.checked.map((id) => RULE_NAMES[id].toLowerCase()).join(', ') + '. No incluye obstrucciones, vigas ni cielos inclinados.',
+        ),
+      ),
+    );
   }
 
   // Materiales

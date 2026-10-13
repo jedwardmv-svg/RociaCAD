@@ -244,6 +244,55 @@ export interface Project {
   hangerStructureZ?: number;
   /** Datos de fabricación (lista de corte) */
   fabrication?: FabricationSettings;
+  /** Opciones de los planos de entrega */
+  drawings?: DrawingSettings;
+}
+
+/** Opciones de los planos de entrega (PDF) */
+export interface DrawingSettings {
+  /** id de la hoja (ver PAPER_SIZES) */
+  paper: string;
+  /** escala 1:n; 0 = la que quepa */
+  scale: number;
+  sheets: { plan: boolean; iso: boolean; data: boolean };
+  /** dibujar el plano de fondo en gris */
+  underlay: boolean;
+  sizes: boolean;
+  lengths: boolean;
+  elevations: boolean;
+  nodes: boolean;
+  hangers: boolean;
+  revision: string;
+  checkedBy?: string;
+  company?: string;
+  notes: string;
+}
+
+export const DEFAULT_DRAWING_NOTES = [
+  'Diseño e instalación según NFPA 13 (edición que exija la autoridad competente) y NSR-10 Título J.',
+  'Rociadores, tubería, accesorios y soportes listados para protección contra incendio.',
+  'Verificar medidas y alturas en obra antes de fabricar.',
+  'Soportes según NFPA 13. El arriostramiento sísmico se diseña aparte.',
+  'Prueba hidrostática a 200 psi durante 2 horas (o 50 psi por encima de la presión estática máxima si esta pasa de 150 psi).',
+].join('\n');
+
+export function drawingSettings(p: Project): DrawingSettings {
+  const d = p.drawings;
+  return {
+    paper: d?.paper ?? 'a1',
+    scale: d?.scale ?? 0,
+    sheets: { plan: d?.sheets?.plan ?? true, iso: d?.sheets?.iso ?? true, data: d?.sheets?.data ?? true },
+    underlay: d?.underlay ?? true,
+    sizes: d?.sizes ?? true,
+    lengths: d?.lengths ?? false,
+    elevations: d?.elevations ?? false,
+    nodes: d?.nodes ?? true,
+    hangers: d?.hangers ?? true,
+    revision: d?.revision ?? '0',
+    checkedBy: d?.checkedBy,
+    company: d?.company,
+    notes: d?.notes ?? DEFAULT_DRAWING_NOTES,
+  };
 }
 
 export interface FabricationSettings {

@@ -801,6 +801,25 @@ export class Viewer {
       }
   }
 
+  /** Lleva la vista a un punto sin cambiar el giro ni el acercamiento (y acerca si está muy lejos) */
+  focusOn(x: number, y: number, z: number, span = 60) {
+    const target = new THREE.Vector3(x, y, z);
+    const delta = target.clone().sub(this.controls.target);
+    this.camera.position.add(delta);
+    this.controls.target.copy(target);
+    if (this.camera === this.ortho) {
+      const visible = (this.ortho.top - this.ortho.bottom) / this.ortho.zoom;
+      if (visible > span * 3) {
+        this.ortho.zoom = (this.ortho.top - this.ortho.bottom) / span;
+        this.ortho.updateProjectionMatrix();
+      }
+    } else {
+      const d = this.persp.position.distanceTo(target);
+      if (d > span * 3) this.persp.position.copy(target).add(this.persp.position.clone().sub(target).setLength(span * 2));
+    }
+    this.controls.update();
+  }
+
   /** Objeto bajo el puntero (los rociadores y nodos tienen prioridad sobre los tubos). */
   pick(ev: PointerEvent | MouseEvent): Hit | null {
     const ray = this.rayFrom(ev);
