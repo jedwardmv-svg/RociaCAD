@@ -1231,6 +1231,26 @@ table.grid tfoot td {
   display: block;
 }
 
+.cat-report {
+  position: absolute;
+  right: 16px;
+  bottom: 16px;
+  left: 16px;
+  max-height: 45%;
+  overflow: auto;
+  padding: 12px 14px;
+  border: 1px solid var(--warn);
+  border-radius: var(--r-md);
+  background: var(--panel);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
+  font-size: 13px;
+}
+
+.cat-report ul {
+  margin: 6px 0 10px;
+  padding-left: 18px;
+}
+
 .drawings-dialog {
   width: min(760px, 94vw);
   padding: 0;

@@ -24,3 +24,4 @@ export * from './hangers';
 export * from './cutList';
 export * from './rules';
 export * from './drawing';
+export * from './catalogSheet';

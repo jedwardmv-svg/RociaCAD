@@ -7,7 +7,7 @@ import { contextBridge, ipcRenderer } from 'electron';
 const api = {
   openFile: (kind: 'project' | 'catalog' = 'project'): Promise<{ path: string; name: string; content: string } | null> =>
     ipcRenderer.invoke('file:open', kind),
-  saveFile: (args: { path?: string; content: string; suggestedName?: string; kind?: 'project' | 'catalog' | 'dxf' | 'csv' }): Promise<{ path: string; name: string } | null> =>
+  saveFile: (args: { path?: string; content: string; suggestedName?: string; kind?: 'project' | 'catalog' | 'dxf' | 'csv' | 'xlsx'; base64?: boolean }): Promise<{ path: string; name: string } | null> =>
     ipcRenderer.invoke('file:save', args),
   /** Lee un DWG en la ventana aislada; devuelve el plano en líneas */
   parseDwg: (bytes: Uint8Array): Promise<unknown> => ipcRenderer.invoke('dwg:parse', bytes),

@@ -1,0 +1,5 @@
+// Versión de ExcelJS para navegador (mismos tipos que el paquete)
+declare module 'exceljs/dist/exceljs.min.js' {
+  const ExcelJS: typeof import('exceljs');
+  export default ExcelJS;
+}

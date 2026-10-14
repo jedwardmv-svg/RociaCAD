@@ -7,12 +7,13 @@ import { basename, join } from 'node:path';
 import './dwg';
 import { checkForUpdates, initUpdater, installIfRequested, loadSettings, saveSettings } from './updater';
 
-type FileKind = 'project' | 'catalog' | 'dxf' | 'csv';
+type FileKind = 'project' | 'catalog' | 'dxf' | 'csv' | 'xlsx';
 const KINDS: Record<FileKind, { name: string; ext: string; fallback: string }> = {
   project: { name: 'Proyecto RociaCAD', ext: 'rcad', fallback: 'proyecto' },
   catalog: { name: 'Catálogo RociaCAD', ext: 'rcatalogo', fallback: 'catalogo' },
   dxf: { name: 'Dibujo DXF', ext: 'dxf', fallback: 'dibujo' },
   csv: { name: 'Tabla CSV (Excel)', ext: 'csv', fallback: 'lista' },
+  xlsx: { name: 'Libro de Excel', ext: 'xlsx', fallback: 'catalogo' },
 };
 const filtersFor = (kind: FileKind) => [{ name: KINDS[kind].name, extensions: [KINDS[kind].ext] }];
 
@@ -175,7 +176,7 @@ ipcMain.handle('file:open', async (_e, kind: FileKind = 'project') => {
   return { path, name: basename(path), content };
 });
 
-ipcMain.handle('file:save', async (_e, args: { path?: string; content: string; suggestedName?: string; kind?: FileKind }) => {
+ipcMain.handle('file:save', async (_e, args: { path?: string; content: string; suggestedName?: string; kind?: FileKind; base64?: boolean }) => {
   if (!win) return null;
   const kind = args.kind && KINDS[args.kind] ? args.kind : 'project';
   let path = args.kind === 'project' || !args.kind ? args.path : undefined;
@@ -187,7 +188,9 @@ ipcMain.handle('file:save', async (_e, args: { path?: string; content: string; s
     if (r.canceled || !r.filePath) return null;
     path = r.filePath;
   }
-  await writeFile(path, args.content, 'utf8');
+  // los archivos binarios (Excel) llegan en base64
+  if (args.base64) await writeFile(path, Buffer.from(args.content, 'base64'));
+  else await writeFile(path, args.content, 'utf8');
   return { path, name: basename(path) };
 });
 

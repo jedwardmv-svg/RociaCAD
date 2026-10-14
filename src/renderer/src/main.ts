@@ -55,6 +55,8 @@ import { buildReport } from './report';
 import { planHooks } from './planPanel';
 import { buildFabricationSheet, fabricationHooks } from './fabrication';
 import { reviewHooks } from './review';
+import { importExcelBuffer, templateBuffer } from './excel';
+import { toBase64 as b64 } from './underlay';
 import { buildSheets, drawingsHooks, openDrawingsDialog, sheetsReady } from './drawings';
 import { initPanels, togglePanel, toggleAllPanels } from './panels';
 import { selectionFrom, store, toggleInSelection, type ColorMode, type LabelMode, type Tool } from './state';
@@ -1597,7 +1599,7 @@ async function start() {
   // la app abre con un proyecto en blanco; los ejemplos están en Archivo → Ejemplos
   store.load(emptyProject());
   // Acceso para pruebas automáticas (solo si se abre con #debug)
-  if (location.hash === '#debug') Object.assign(window, { rociaDebug: { store, viewer, actions, setTool, setView, planHooks, projectFileContent, normalize, drawingsHooks, openDrawingsDialog, buildSheets, sheetsReady, drawingSettings, core } });
+  if (location.hash === '#debug') Object.assign(window, { rociaDebug: { store, viewer, actions, setTool, setView, planHooks, projectFileContent, normalize, drawingsHooks, openDrawingsDialog, buildSheets, sheetsReady, drawingSettings, core, excel: { templateBase64: async () => b64(await templateBuffer()), importBase64: (s: string) => importExcelBuffer(Uint8Array.from(atob(s), (c) => c.charCodeAt(0)).buffer) } } });
   renderViewSwitch();
   setTool('select');
   viewer.fit();

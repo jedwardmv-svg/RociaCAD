@@ -21,6 +21,7 @@ import {
 import { catalogElements, catalogMaterials, catalogSprinklers, exportText, importInto, personal, savePersonal } from './catalogStore';
 import { clear, h } from './dom';
 import { flash, numInput, rerender, selectInput } from './fields';
+import { downloadTemplate, importExcel } from './excel';
 import { store } from './state';
 
 type Tab = 'materials' | 'sprinklers' | 'elements';
@@ -84,8 +85,10 @@ function render() {
             h('button', { role: 'tab', 'aria-selected': String(t === tab), onclick: () => ((tab = t), (selected = null), render()) }, TAB_NAMES[t]),
           ),
         ),
-        h('button', { class: 'btn outline small', onclick: () => importCatalog() }, 'Importar'),
-        h('button', { class: 'btn outline small', onclick: () => exportCatalog() }, 'Exportar'),
+        h('button', { class: 'btn outline small', title: 'Plantilla de Excel con sus ítems propios, para llenarla con las hojas técnicas', onclick: () => excelTemplate() }, 'Plantilla de Excel'),
+        h('button', { class: 'btn outline small', title: 'Agregar al catálogo las tuberías, rociadores y elementos de un Excel', onclick: () => excelImport() }, 'Importar de Excel'),
+        h('button', { class: 'btn outline small', title: 'Abrir un archivo .rcatalogo', onclick: () => importCatalog() }, 'Importar'),
+        h('button', { class: 'btn outline small', title: 'Guardar su catálogo como archivo .rcatalogo', onclick: () => exportCatalog() }, 'Exportar'),
         h('button', { class: 'btn small primary', onclick: () => d.close() }, 'Cerrar'),
       ),
       h(
@@ -287,6 +290,44 @@ function form(item: AnyItem): HTMLElement {
     row(heightLabel, numInput({ disabled: ro, label: heightLabel, q: 'length', value: e.height, min: 0.001, key: `cat-h-${e.id}`, onCommit: (v) => !ro && up({ height: v } as Partial<ElementType>) })),
     row('Color', colorInput(e.color, `cat-ecolor-${e.id}`, (v) => up({ color: v } as Partial<ElementType>), ro)),
   );
+}
+
+async function excelTemplate() {
+  try {
+    if (await downloadTemplate()) flash('Plantilla de Excel guardada');
+  } catch (err) {
+    flash(`No se pudo crear la plantilla: ${(err as Error).message}`);
+  }
+}
+
+let report: HTMLElement | null = null;
+
+async function excelImport() {
+  try {
+    const r = await importExcel();
+    if (!r) return;
+    render();
+    const ok = r.added + r.updated;
+    const msg = ok
+      ? `Se agregaron ${r.added} ítems${r.updated ? ` y se actualizaron ${r.updated}` : ''}.`
+      : 'El archivo no traía ítems para importar (las filas "Ejemplo" no se importan).';
+    flash(r.errors.length ? `${msg} ${r.errors.length} fila(s) con problemas.` : msg);
+    // detalle de las filas que no entraron
+    report?.remove();
+    if (r.errors.length && dlg) {
+      report = h(
+        'div',
+        { class: 'cat-report' },
+        h('b', null, `${msg} Estas filas no se importaron:`),
+        h('ul', null, r.errors.slice(0, 30).map((e) => h('li', null, e))),
+        r.errors.length > 30 ? h('p', null, `… y ${r.errors.length - 30} más.`) : null,
+        h('button', { class: 'btn outline small', onclick: () => (report?.remove(), (report = null)) }, 'Entendido'),
+      );
+      dlg.append(report);
+    }
+  } catch (err) {
+    flash(`No se pudo leer el Excel: ${(err as Error).message}`);
+  }
 }
 
 async function exportCatalog() {
